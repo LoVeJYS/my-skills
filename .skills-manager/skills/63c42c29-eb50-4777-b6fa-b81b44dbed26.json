@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "63c42c29-eb50-4777-b6fa-b81b44dbed26",
+  "path": "codex-windows-fast-patch",
+  "path_key": "codex-windows-fast-patch",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/chen0416ccc-cpu/codex-windows-fast-patch-skill",
+    "subpath": null,
+    "branch": null
+  }
+}

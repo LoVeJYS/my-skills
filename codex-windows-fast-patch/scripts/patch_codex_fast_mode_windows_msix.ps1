@@ -86,44 +86,175 @@ function Test-CodexAppPath {
   )
 }
 
+function Get-CodexAppVersion {
+  param([string]$Candidate)
+  $app = Normalize-AppPath $Candidate
+  if ([string]::IsNullOrWhiteSpace($app)) {
+    return [version]'0.0.0.0'
+  }
+
+  $packageName = Split-Path -Leaf (Split-Path -Parent $app)
+  if ($packageName -match '^OpenAI\.Codex_(?<version>\d+(?:\.\d+){1,3})_') {
+    try {
+      return [version]$Matches.version
+    } catch {
+      return [version]'0.0.0.0'
+    }
+  }
+  return [version]'0.0.0.0'
+}
+
 function Find-CodexAppPath {
   if ($AppPath) {
     $manual = Normalize-AppPath $AppPath
     if (-not (Test-CodexAppPath $manual)) {
       Fail "-AppPath is not a Codex app directory: $AppPath"
     }
+    $manualVersion = Get-CodexAppVersion $manual
+    Write-Log "selected Codex app: $manual version=$manualVersion source=explicit-AppPath"
     return $manual
   }
 
-  $pkg = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
-    Sort-Object Version -Descending |
-    Select-Object -First 1
-  if ($pkg -and $pkg.InstallLocation) {
-    $candidate = Join-Path $pkg.InstallLocation 'app'
-    if (Test-CodexAppPath $candidate) {
-      return (Normalize-AppPath $candidate)
+  $candidates = [System.Collections.Generic.List[object]]::new()
+  $seen = @{}
+  $addCandidate = {
+    param(
+      [string]$Candidate,
+      [object]$Version,
+      [int]$Priority,
+      [string]$Source
+    )
+    $normalized = Normalize-AppPath $Candidate
+    if (-not (Test-CodexAppPath $normalized)) {
+      return
+    }
+    $key = $normalized.TrimEnd('\').ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      return
+    }
+    $resolvedVersion = $null
+    if ($null -ne $Version) {
+      try {
+        $resolvedVersion = [version]$Version
+      } catch {
+        $resolvedVersion = $null
+      }
+    }
+    if ($null -eq $resolvedVersion) {
+      $resolvedVersion = Get-CodexAppVersion $normalized
+    }
+    $seen[$key] = $true
+    $candidates.Add([pscustomobject]@{
+      AppPath = $normalized
+      Version = $resolvedVersion
+      Priority = $Priority
+      Source = $Source
+    })
+  }
+
+  # Store updates can leave the newest package Staged for SYSTEM while the
+  # user's package query still returns the older installed build. Keep only
+  # the current-user and SYSTEM-Staged registrations from the all-user view.
+  $currentPackages = @(Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue)
+  foreach ($pkg in ($currentPackages | Sort-Object Version -Descending)) {
+    if ($pkg -and $pkg.InstallLocation) {
+      & $addCandidate (Join-Path $pkg.InstallLocation 'app') $pkg.Version 3 'appx-package-current-user'
     }
   }
 
-  $running = Get-Process -Name 'Codex' -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -and $_.Path -like '*\WindowsApps\OpenAI.Codex_*\app\Codex.exe' } |
-    Sort-Object StartTime -Descending |
-    Select-Object -First 1
-  if ($running) {
-    $candidate = Split-Path -Parent $running.Path
-    if (Test-CodexAppPath $candidate) {
-      return (Normalize-AppPath $candidate)
+  $allUsersPackages = @()
+  $allUsersQueryFailed = $false
+  try {
+    $allUsersPackages = @(Get-AppxPackage -Name 'OpenAI.Codex' -AllUsers -ErrorAction Stop)
+  } catch {
+    $allUsersQueryFailed = $true
+    Write-Log "warning: could not query all user Codex packages: $($_.Exception.Message)"
+  }
+
+  $currentUserSid = $null
+  try {
+    $currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  } catch {
+    Write-Log "warning: could not determine current user SID: $($_.Exception.Message)"
+  }
+  foreach ($pkg in ($allUsersPackages | Sort-Object Version -Descending)) {
+    if (-not ($pkg -and $pkg.InstallLocation)) {
+      continue
+    }
+
+    $source = $null
+    foreach ($userInfo in @($pkg.PackageUserInformation)) {
+      $sid = $null
+      $securityId = $userInfo.UserSecurityId
+      if ($securityId) {
+        if ($securityId.PSObject.Properties['Sid']) {
+          $sid = [string]$securityId.Sid
+        } elseif ($securityId.PSObject.Properties['Value']) {
+          $sid = [string]$securityId.Value
+        } else {
+          $sid = [string]$securityId
+        }
+      }
+      $installState = [string]$userInfo.InstallState
+      if ($sid -eq 'S-1-5-18' -and $installState -eq 'Staged') {
+        $source = 'appx-package-system-staged'
+        break
+      }
+      if ($currentUserSid -and $sid -eq $currentUserSid -and $installState -in @('Installed', 'Staged')) {
+        $source = 'appx-package-current-user'
+      }
+    }
+    if ($source) {
+      & $addCandidate (Join-Path $pkg.InstallLocation 'app') $pkg.Version 3 $source
+    } else {
+      Write-Log "warning: ignoring all-user Codex package without current-user or SYSTEM-Staged registration: $($pkg.PackageFullName)"
     }
   }
 
-  $windowsApps = Join-Path $env:ProgramFiles 'WindowsApps'
-  $dirs = Get-ChildItem -LiteralPath $windowsApps -Directory -Filter 'OpenAI.Codex_*_x64__*' -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending
-  foreach ($dir in $dirs) {
-    $candidate = Join-Path $dir.FullName 'app'
+  $validRunningCandidateFound = $false
+  $running = @(Get-Process -Name 'Codex', 'ChatGPT' -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Path -and (
+        $_.Path -like '*\WindowsApps\OpenAI.Codex_*\app\Codex.exe' -or
+        $_.Path -like '*\WindowsApps\OpenAI.Codex_*\app\ChatGPT.exe'
+      )
+    })
+  foreach ($process in @($running)) {
+    $candidate = Split-Path -Parent $process.Path
     if (Test-CodexAppPath $candidate) {
-      return (Normalize-AppPath $candidate)
+      $validRunningCandidateFound = $true
     }
+    & $addCandidate $candidate $null 2 'running-process'
+  }
+
+  $validWindowsAppsDirectoryFound = $false
+  if ($allUsersQueryFailed -or $allUsersPackages.Count -eq 0) {
+    $windowsApps = Join-Path $env:ProgramFiles 'WindowsApps'
+    try {
+      $dirs = Get-ChildItem -LiteralPath $windowsApps -Directory -Filter 'OpenAI.Codex_*_x64__*' -ErrorAction Stop |
+        Sort-Object LastWriteTime -Descending
+      foreach ($dir in $dirs) {
+        $candidate = Join-Path $dir.FullName 'app'
+        if (Test-CodexAppPath $candidate) {
+          $validWindowsAppsDirectoryFound = $true
+        }
+        & $addCandidate $candidate $null 1 'WindowsApps-directory'
+      }
+    } catch {
+      Write-Log "warning: could not enumerate WindowsApps Codex packages: $($_.Exception.Message)"
+    }
+  }
+
+  if ($allUsersQueryFailed -and -not $validWindowsAppsDirectoryFound -and -not $validRunningCandidateFound) {
+    Fail 'could not confirm Codex package candidates because the all-user query and WindowsApps fallback failed. Pass -AppPath explicitly.'
+  }
+
+  $selected = $candidates |
+    Sort-Object @{Expression = 'Version'; Descending = $true}, @{Expression = 'Priority'; Descending = $true} |
+    Select-Object -First 1
+  if ($selected) {
+    Write-Log "selected Codex app: $($selected.AppPath) version=$($selected.Version) source=$($selected.Source)"
+    return $selected.AppPath
   }
 
   Fail 'could not find Windows Store/MSIX Codex app. Pass -AppPath explicitly.'
@@ -487,18 +618,37 @@ function Invoke-RgList {
   return @($output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
+function Find-UltraSliderTarget {
+  param(
+    [string]$RgPath,
+    [string]$AssetsDir
+  )
+  foreach ($candidate in (Invoke-RgList $RgPath 'model_picker_persists_ultra_effort' $AssetsDir)) {
+    $text = Get-Content -Raw -LiteralPath $candidate
+    if ($text.Contains('chatgpt-user-settings') -and
+        $text.Contains('showUltraInModelPickerSlider') -and
+        ($text.Contains('setUltraEffortEnabled') -or $text.Contains('CODEX_ULTRA_LOCAL_FALLBACK_V1'))) {
+      return $candidate
+    }
+  }
+  return $null
+}
+
 function Write-PatcherFiles {
   param([string]$WorkDir)
 
   $fastPatcherPath = Join-Path $WorkDir 'PatchFastMode.cjs'
   $fastUiPatcherPath = Join-Path $WorkDir 'PatchFastModeUi.cjs'
   $customModelsPatcherPath = Join-Path $WorkDir 'PatchCustomModels.cjs'
+  $powerSliderPatcherPath = Join-Path $WorkDir 'PatchPowerSlider.cjs'
+  $ultraSliderPatcherPath = Join-Path $WorkDir 'PatchUltraSliderLocalFallback.cjs'
   $localePatcherPath = Join-Path $WorkDir 'PatchLocaleI18n.cjs'
   $pluginsPatcherPath = Join-Path $WorkDir 'PatchPlugins.cjs'
   $goalPatcherPath = Join-Path $WorkDir 'PatchGoal.cjs'
   $computerUsePatcherPath = Join-Path $WorkDir 'PatchComputerUseGates.cjs'
   $browserUsePatcherPath = Join-Path $WorkDir 'PatchBrowserUseGates.cjs'
   $bundledMarketplaceCopyPatcherPath = Join-Path $WorkDir 'PatchBundledMarketplaceCopy.cjs'
+  $nodeReplTrustedPathsPatcherPath = Join-Path $WorkDir 'PatchNodeReplTrustedPaths.cjs'
 
   Set-Content -LiteralPath $fastPatcherPath -Encoding UTF8 -Value @'
 const fs = require('node:fs');
@@ -508,13 +658,16 @@ const text = fs.readFileSync(file, 'utf8');
 const legacyPatchedRe = /function L\(e\)\{let (\w+)=v\(x\),(\w+)=e\?\.hostId\?\?\1,\{data:(\w+)\}=d\(E,\2\);return \3\?\.requirements\?\.featureRequirements\?\.fast_mode!==!1\}/;
 const currentDirectPatchedRe = /featureRequirements\?\.fast_mode===!1;return!\w+\}/;
 const currentAsyncPatchedRe = /async function \w+\(\w+,\w+\)\{let \w+=await \w+\(\w+,\w+\);return\(await \w+\.query\.fetch\(\w+,\{authMethod:\w+,hostId:\w+\}\)\)\.requirements\?\.featureRequirements\?\.fast_mode!==!1\}/;
-const currentCachedAsyncPatchedRe = /return [^;]+\.query\.setData\([\s\S]*?\),\w+\.requirements\?\.featureRequirements\?\.fast_mode!==!1\}/;
+const currentCachedAsyncPatchedRe = /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\2,\3\);let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\3,\{priority:`critical`\}\);return \2\.query\.setData\(([A-Za-z_$][\w$]*),\{authMethod:\4,hostId:\3\},\6\),\6\.requirements\?\.featureRequirements\?\.fast_mode!==!1\}/;
+const currentManagerCachedAsyncPatchedRe = /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\2,\3\);let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\2,\3,\{priority:`critical`\}\);return \2\.query\.setData\(([A-Za-z_$][\w$]*),\{authMethod:\4,hostId:\3\},\6\),\6\.requirements\?\.featureRequirements\?\.fast_mode!==!1\}/;
 const legacyOriginalRe = /function L\(e\)\{let (\w+)=v\(x\),(\w+)=e\?\.hostId\?\?\1,(\w+)=O\(\2\),\{data:(\w+)\}=d\(E,\2\);return!\(\3\?\.authMethod!==`chatgpt`\|\|\4\?\.requirements\?\.featureRequirements\?\.fast_mode===!1\)\}/;
 const currentDirectOriginalRe = /function (\w+)\(e\)\{let (\w+)=([^,;]+),(\w+)=e\?\.hostId\?\?\2,(\w+)=(\w+\(\4\)),\{data:(\w+)\}=(\w+\(\w+,\4\)),(\w+)=\7\?\.requirements\?\.featureRequirements\?\.fast_mode===!1;return!\(\5\?\.authMethod!==`chatgpt`\|\|\9\)\}/;
 const currentAsyncOriginalRe = /async function (\w+)\((\w+),(\w+)\)\{let (\w+)=await ([A-Za-z_$][\w$]*)\(\2,\3\);return \4===`chatgpt`\?\(await \2\.query\.fetch\(([A-Za-z_$][\w$]*),\{authMethod:\4,hostId:\3\}\)\)\.requirements\?\.featureRequirements\?\.fast_mode!==!1:!1\}/;
+const currentCachedAsyncOriginalRe = /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\2,\3\);if\(\4!==`chatgpt`\)return!1;let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\3,\{priority:`critical`\}\);return \2\.query\.setData\(([A-Za-z_$][\w$]*),\{authMethod:\4,hostId:\3\},\6\),\6\.requirements\?\.featureRequirements\?\.fast_mode!==!1\}/;
+const currentManagerCachedAsyncOriginalRe = /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\2,\3\);if\(\4!==`chatgpt`\)return!1;let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\2,\3,\{priority:`critical`\}\);return \2\.query\.setData\(([A-Za-z_$][\w$]*),\{authMethod:\4,hostId:\3\},\6\),\6\.requirements\?\.featureRequirements\?\.fast_mode!==!1\}/;
 const currentSplitConditionRe = /if\((\w+)\?\.authMethod!==`chatgpt`\|\|(\w+)\)\{/;
 
-if (legacyPatchedRe.test(text) || currentAsyncPatchedRe.test(text) || currentCachedAsyncPatchedRe.test(text) || (currentDirectPatchedRe.test(text) && !legacyOriginalRe.test(text) && !currentDirectOriginalRe.test(text) && !currentSplitConditionRe.test(text))) {
+if (legacyPatchedRe.test(text) || currentAsyncPatchedRe.test(text) || currentCachedAsyncPatchedRe.test(text) || currentManagerCachedAsyncPatchedRe.test(text) || (currentDirectPatchedRe.test(text) && !legacyOriginalRe.test(text) && !currentDirectOriginalRe.test(text) && !currentSplitConditionRe.test(text))) {
   process.stdout.write('already-patched');
   process.exit(0);
 }
@@ -543,6 +696,20 @@ if (!patched) {
     patched = true;
   }
 
+  const currentCachedAsyncMatch = next.match(currentCachedAsyncOriginalRe);
+  if (currentCachedAsyncMatch) {
+    const [, fn, hostManagerVar, hostIdVar, authMethodVar, authMethodFn, requirementsVar, requirementsFn, queryVar] = currentCachedAsyncMatch;
+    next = next.replace(currentCachedAsyncOriginalRe, `async function ${fn}(${hostManagerVar},${hostIdVar}){let ${authMethodVar}=await ${authMethodFn}(${hostManagerVar},${hostIdVar});let ${requirementsVar}=await ${requirementsFn}(${hostIdVar},{priority:\`critical\`});return ${hostManagerVar}.query.setData(${queryVar},{authMethod:${authMethodVar},hostId:${hostIdVar}},${requirementsVar}),${requirementsVar}.requirements?.featureRequirements?.fast_mode!==!1}`);
+    patched = true;
+  }
+
+  const currentManagerCachedAsyncMatch = next.match(currentManagerCachedAsyncOriginalRe);
+  if (currentManagerCachedAsyncMatch) {
+    const [, fn, hostManagerVar, hostIdVar, authMethodVar, authMethodFn, requirementsVar, requirementsFn, queryVar] = currentManagerCachedAsyncMatch;
+    next = next.replace(currentManagerCachedAsyncOriginalRe, `async function ${fn}(${hostManagerVar},${hostIdVar}){let ${authMethodVar}=await ${authMethodFn}(${hostManagerVar},${hostIdVar});let ${requirementsVar}=await ${requirementsFn}(${hostManagerVar},${hostIdVar},{priority:\`critical\`});return ${hostManagerVar}.query.setData(${queryVar},{authMethod:${authMethodVar},hostId:${hostIdVar}},${requirementsVar}),${requirementsVar}.requirements?.featureRequirements?.fast_mode!==!1}`);
+    patched = true;
+  }
+
   if (/canUseFastMode:!1/.test(next)) {
     const splitNext = next.replace(currentSplitConditionRe, 'if($2){');
     if (splitNext === next) {
@@ -555,7 +722,7 @@ if (!patched) {
 }
 
 if (!patched) {
-  process.stderr.write('patch-target-not-found\n');
+  process.stderr.write('fast-mode-patch-target-not-found\n');
   process.exit(2);
 }
 fs.writeFileSync(file, next);
@@ -608,18 +775,153 @@ if (text.includes(marker) && models.every((model) => text.includes(model))) {
   process.exit(0);
 }
 
-const visibilityRe = /if\(([$A-Za-z_][$\w]*)\?([$A-Za-z_][$\w]*)\.has\(([$A-Za-z_][$\w]*)\.model\):!\3\.hidden\)\{/;
-const match = text.match(visibilityRe);
+const visibilityPatterns = [
+  {
+    re: /return ([$A-Za-z_][$\w]*)\?\.has\(([$A-Za-z_][$\w]*)\.model\)===!0\|\|\2\.model!==`codex-auto-review`&&\(([$A-Za-z_][$\w]*)&&!([$A-Za-z_][$\w]*)&&([$A-Za-z_][$\w]*)!==`amazonBedrock`\?([$A-Za-z_][$\w]*)\.has\(\2\.model\):!\2\.hidden\)\}/,
+    modelGroup: 2,
+    isReturn: true,
+  },
+  {
+    re: /if\(([$A-Za-z_][$\w]*)\?([$A-Za-z_][$\w]*)\.has\(([$A-Za-z_][$\w]*)\.model\):!\3\.hidden\)\{/,
+    modelGroup: 3,
+  },
+  {
+    re: /if\(([$A-Za-z_][$\w]*)\?\.has\(([$A-Za-z_][$\w]*)\.model\)===!0\|\|\(([$A-Za-z_][$\w]*)\?([$A-Za-z_][$\w]*)\.has\(\2\.model\):!\2\.hidden\)\)\{/,
+    modelGroup: 2,
+  },
+  {
+    re: /return ([$A-Za-z_][$\w]*)\?\.has\(([$A-Za-z_][$\w]*)\.model\)===!0\|\|\(([$A-Za-z_][$\w]*)(?:&&[$A-Za-z_][$\w]*!==`amazonBedrock`)?\?([$A-Za-z_][$\w]*)\.has\(\2\.model\):!\2\.hidden\)\}/,
+    modelGroup: 2,
+    isReturn: true,
+  },
+];
+const target = visibilityPatterns
+  .map(({ re, modelGroup, isReturn }) => ({ match: text.match(re), modelGroup, isReturn }))
+  .find(({ match }) => match != null);
+const match = target?.match;
 if (!match) {
   process.stderr.write('custom-model-visibility-target-not-found\n');
   process.exit(2);
 }
 
 const forced = JSON.stringify(models);
-const replacement = `if(/*${marker}*/${forced}.includes(${match[3]}.model)||(${match[1]}?${match[2]}.has(${match[3]}.model):!${match[3]}.hidden)){`;
-const next = text.replace(visibilityRe, replacement);
+const modelVar = match[target.modelGroup];
+let replacement;
+if (target.isReturn) {
+  const originalCondition = match[0].slice('return '.length, -1);
+  replacement = `return/*${marker}*/${forced}.includes(${modelVar}.model)||(${originalCondition})}`;
+} else {
+  const originalCondition = match[0].slice(3, -2);
+  replacement = `if(/*${marker}*/${forced}.includes(${modelVar}.model)||(${originalCondition})){`;
+}
+const next = text.replace(match[0], replacement);
 if (!next.includes(marker) || !models.every((model) => next.includes(model))) {
   process.stderr.write('custom-model-patch-verification-failed\n');
+  process.exit(2);
+}
+fs.writeFileSync(file, next);
+process.stdout.write('patched');
+'@
+
+  Set-Content -LiteralPath $powerSliderPatcherPath -Encoding UTF8 -Value @'
+const fs = require('node:fs');
+const file = process.argv[2];
+const marker = 'CODEX_POWER_SLIDER_V1';
+const text = fs.readFileSync(file, 'utf8');
+
+if (text.includes(marker)) {
+  process.stdout.write('already-patched');
+  process.exit(0);
+}
+
+if (!text.includes('harborEnabled:') && (text.includes('composer.modelPicker.power') || /model-picker-power-slider-impl/i.test(file) || text.includes('ModelPickerPowerSliderImpl'))) {
+  process.stdout.write('already-patched');
+  process.exit(0);
+}
+
+const gateRe = /function ([$A-Za-z_][$\w]*)\(\{harborEnabled:([$A-Za-z_][$\w]*),isElectron:([$A-Za-z_][$\w]*),isEverydayWorkMode:([$A-Za-z_][$\w]*)\}\)\{return \4\|\|\3&&\2\}/;
+const match = text.match(gateRe);
+if (!match) {
+  process.stderr.write('power-slider-harbor-gate-target-not-found\n');
+  process.exit(2);
+}
+
+const [, fn, harborEnabled, isElectron, isEverydayWorkMode] = match;
+const replacement = `function ${fn}({harborEnabled:${harborEnabled},isElectron:${isElectron},isEverydayWorkMode:${isEverydayWorkMode}}){return ${isEverydayWorkMode}||${isElectron}/*${marker}*/}`;
+const next = text.replace(gateRe, replacement);
+if (!next.includes(marker)) {
+  process.stderr.write('power-slider-patch-verification-failed\n');
+  process.exit(2);
+}
+fs.writeFileSync(file, next);
+process.stdout.write('patched');
+'@
+
+  Set-Content -LiteralPath $ultraSliderPatcherPath -Encoding UTF8 -Value @'
+const fs = require('node:fs');
+const file = process.argv[2];
+const marker = 'CODEX_ULTRA_LOCAL_FALLBACK_V1';
+const migrationMarker = 'CODEX_ULTRA_LOCAL_FALLBACK_V1_MIGRATION';
+
+if (!file || file === '__none__') {
+  process.stdout.write('not-applicable');
+  process.exit(0);
+}
+
+const text = fs.readFileSync(file, 'utf8');
+if (text.includes(marker) && text.includes(migrationMarker) && text.includes('ultraEffortLocalFallback')) {
+  process.stdout.write('already-patched');
+  process.exit(0);
+}
+
+const readConfigMatch = text.match(/([$A-Za-z_][$\w]*)\(([$A-Za-z_][$\w]*)\.showUltraInModelPickerSlider\)\.catch\(\(\)=>!1\)/);
+const writeConfigMatch = text.match(/await ([$A-Za-z_][$\w]*)\(([$A-Za-z_][$\w]*),([$A-Za-z_][$\w]*)\.showUltraInModelPickerSlider,!1\)\.catch\(\(\)=>\{\}\)/);
+if (!readConfigMatch || !writeConfigMatch || readConfigMatch[2] !== writeConfigMatch[3]) {
+  process.stderr.write('ultra-local-config-helper-target-not-found\n');
+  process.exit(2);
+}
+const readConfig = readConfigMatch[1];
+const settings = readConfigMatch[2];
+const writeConfig = writeConfigMatch[1];
+
+const mutationRe = /async function ([$A-Za-z_][$\w]*)\(([$A-Za-z_][$\w]*),([$A-Za-z_][$\w]*)\)\{let ([$A-Za-z_][$\w]*)=\2\.query\.snapshot\(([$A-Za-z_][$\w]*)\),([$A-Za-z_][$\w]*)=\4\.getData\(\);\4\.setData\(([$A-Za-z_][$\w]*)=>\7==null\?\7:\{\.\.\.\7,ultraEffortEnabled:\3\}\);try\{await \2\.get\(([$A-Za-z_][$\w]*)\)\.setUltraEffortEnabled\(\3\),await Promise\.all\(\[\4\.invalidate\(\),\2\.query\.snapshot\(([$A-Za-z_][$\w]*)\)\.invalidate\(\)\]\)\}catch\(([$A-Za-z_][$\w]*)\)\{throw \4\.setData\(\6\),\10\}\}/;
+const mutationMatch = text.match(mutationRe);
+if (!mutationMatch) {
+  process.stderr.write('ultra-mutation-target-not-found\n');
+  process.exit(2);
+}
+const [, mutationFn, mutationScope, enabled, snapshot, userSettingsQuery, previous, cached, client, tppQuery] = mutationMatch;
+const mutationReplacement = `async function ${mutationFn}(${mutationScope},${enabled}){let ${snapshot}=${mutationScope}.query.snapshot(${userSettingsQuery}),${previous}=${snapshot}.getData();${snapshot}.setData(${cached}=>${cached}==null?${cached}:{...${cached},ultraEffortEnabled:${enabled}});if(${previous}?.ultraEffortLocalFallback===!0){try{await ${writeConfig}(${mutationScope},${settings}.showUltraInModelPickerSlider,${enabled});return}catch(codexUltraLocalError){throw ${snapshot}.setData(${previous}),codexUltraLocalError}}try{await ${mutationScope}.get(${client}).setUltraEffortEnabled(${enabled}),await Promise.all([${snapshot}.invalidate(),${mutationScope}.query.snapshot(${tppQuery}).invalidate()])}catch(codexUltraRemoteError){throw ${snapshot}.setData(${previous}),codexUltraRemoteError}}`;
+let next = text.replace(mutationRe, mutationReplacement);
+
+const queryRe = /queryFn:async\(\)=>\{let ([$A-Za-z_][$\w]*)=([$A-Za-z_][$\w]*)\.parse\(await ([$A-Za-z_][$\w]*)\.get\(([$A-Za-z_][$\w]*)\)\.userSettings\(\)\);return\{((?:eligibleAnnouncements:[^,]+,)?)lockdownModeEnabled:\1\.settings\?\.lockdown_mode_enabled===!0,ultraEffortEnabled:\1\.settings\?\.model_picker_persists_ultra_effort===!0\}\}/;
+const queryMatch = next.match(queryRe);
+if (!queryMatch) {
+  process.stderr.write('ultra-user-settings-query-target-not-found\n');
+  process.exit(2);
+}
+const [, parsed, schema, queryScope, queryClient, eligiblePrefix] = queryMatch;
+const queryReplacement = `queryFn:async()=>{try{let ${parsed}=${schema}.parse(await ${queryScope}.get(${queryClient}).userSettings());return{${eligiblePrefix}lockdownModeEnabled:${parsed}.settings?.lockdown_mode_enabled===!0,ultraEffortEnabled:${parsed}.settings?.model_picker_persists_ultra_effort===!0}}catch{return{lockdownModeEnabled:!1,ultraEffortEnabled:await ${readConfig}(${settings}.showUltraInModelPickerSlider).catch(()=>!1)===!0,ultraEffortLocalFallback:!0/*${marker}*/}}}`;
+next = next.replace(queryRe, queryReplacement);
+
+const migrationKey = 'queryKey:[`chatgpt-ultra-effort-migration`]';
+const migrationKeyIndex = next.indexOf(migrationKey);
+if (migrationKeyIndex < 0) {
+  process.stderr.write('ultra-migration-query-target-not-found\n');
+  process.exit(2);
+}
+const migrationStart = Math.max(0, migrationKeyIndex - 1200);
+const migrationPrefix = next.slice(0, migrationStart);
+const migrationSegment = next.slice(migrationStart, migrationKeyIndex + migrationKey.length);
+const migrationOriginal = '.setUltraEffortEnabled(!0).catch(()=>{})';
+if (!migrationSegment.includes(migrationOriginal)) {
+  process.stderr.write('ultra-migration-swallowed-error-target-not-found\n');
+  process.exit(2);
+}
+next = migrationPrefix + migrationSegment.replace(migrationOriginal, `.setUltraEffortEnabled(!0)/*${migrationMarker}*/`) + next.slice(migrationKeyIndex + migrationKey.length);
+
+if (!next.includes(marker) || !next.includes(migrationMarker) || !next.includes('ultraEffortLocalFallback')) {
+  process.stderr.write('ultra-local-fallback-patch-verification-failed\n');
   process.exit(2);
 }
 fs.writeFileSync(file, next);
@@ -702,12 +1004,19 @@ function patchPluginPageAuth(file) {
     process.stderr.write('plugin-page-auth-target-not-found\n');
     process.exit(2);
   }
-  if (/\{authMethod:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),(?:\{data:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),)?[A-Za-z_$][\w$]*=!1,/.test(text)) return;
+  const migratedPatchedRe = /\{authMethod:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),[^;]{0,2500}?[A-Za-z_$][\w$]*=!1,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.kind===`manage`,/;
+  if (/\{authMethod:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),(?:\{data:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),)?[A-Za-z_$][\w$]*=!1,/.test(text) || migratedPatchedRe.test(text)) return;
 
   const originalRe = /\{authMethod:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*)\(\),((?:\{data:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),)?)([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\1\),/;
-  const next = text.replace(originalRe, (_match, authMethodVar, authHook, middle, blockedVar) =>
+  let next = text.replace(originalRe, (_match, authMethodVar, authHook, middle, blockedVar) =>
     `{authMethod:${authMethodVar}}=${authHook}(),${middle}${blockedVar}=!1,`
   );
+  if (next === text) {
+    const migratedOriginalRe = /\{authMethod:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*)\(\),([^;]{0,2500}?)([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\1\),([A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.kind===`manage`,)/;
+    next = text.replace(migratedOriginalRe, (_match, authMethodVar, authHook, middle, blockedVar, _blockedHook, tail) =>
+      `{authMethod:${authMethodVar}}=${authHook}(),${middle}${blockedVar}=!1,${tail}`
+    );
+  }
   if (next === text) {
     process.stderr.write('plugin-page-auth-patch-target-not-found\n');
     process.exit(2);
@@ -730,8 +1039,10 @@ if (hasFile(pageAuthFile)) {
 }
 
 if (oldFileCount === 0 && !hasFile(pageAuthFile)) {
-  process.stderr.write('plugin-gate-targets-not-found\n');
-  process.exit(2);
+  // No legacy or current auth gate present in this build: the plugin auth gate
+  // was removed upstream and install is already open. Treat as already-patched.
+  process.stdout.write('already-patched');
+  process.exit(0);
 }
 
 process.stdout.write(changed ? 'patched' : 'already-patched');
@@ -775,6 +1086,10 @@ if (!nextSlash.includes(slashPatched) && !slashPatchedRe.test(nextSlash)) {
     changedSlash = true;
   } else if (cmdkSlashRe.test(nextSlash) && (cmdkKeywordSearchRe.test(nextSlash) || nextSlash.includes('keywords:r'))) {
     // Codex 26.519+ moved slash filtering to cmdk keywords; command id matching is already handled there.
+  } else if (nextSlash.includes('id:`goal`') &&
+             nextSlash.includes('getSearchQuery') &&
+             /Math\.max\([A-Za-z_$][\w$]*\(e\.title,[A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*\(e\.id,[A-Za-z_$][\w$]*\),\.\.\.\(e\.searchAliases\?\?\[\]\)\.map/.test(nextSlash)) {
+    // Current unified command registry scores title, id, and aliases, so /goal is already searchable by id.
   } else if (nextSlash.includes('sourceMappingURL=slash-command-item') &&
              !nextSlash.includes('score:') &&
              !nextSlash.includes('e.command.group??null')) {
@@ -849,8 +1164,12 @@ function patchComputerUseAvailability(file) {
 }
 
 function patchComputerUseInstallFlow(file) {
+  if (!file || file === '__none__') {
+    return;
+  }
   const before = read(file);
-  if (!before.includes('openPluginInstall') || !before.includes('installPlugin:async')) {
+  if (!before.includes('openPluginInstall') ||
+      (!before.includes('installPlugin:async') && !before.includes('install-plugin'))) {
     process.stderr.write('computer-use-install-flow-target-not-found\n');
     process.exit(2);
   }
@@ -918,7 +1237,54 @@ function patchFeatureHook(file) {
     process.exit(2);
   }
 
-  let after = before.replace(
+  const currentInAppPairOriginalRe = /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\.isCapable,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(`410262010`\),([A-Za-z_$][\w$]*);/;
+  const currentInAppPairPatchedRe = /let [A-Za-z_$][\w$]*=!0,[A-Za-z_$][\w$]*=\([A-Za-z_$][\w$]*\(`410262010`\),!0\),[A-Za-z_$][\w$]*;\/\*CODEX_BROWSER_IN_APP_GATES_V2\*\//;
+  const currentInAppConfigOriginalRe = /let ([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.runCodexInWsl\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=\1\.enabled&&!\1\.isLoading,([A-Za-z_$][\w$]*)=\1\.isLoading,([A-Za-z_$][\w$]*)=\2===!0\|\|\3\.kind===`wsl`,([A-Za-z_$][\w$]*);/;
+  const currentInAppConfigPatchedRe = /let [A-Za-z_$][\w$]*=\{enabled:!0,isLoading:!1\},[A-Za-z_$][\w$]*=!1,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*=!0,[A-Za-z_$][\w$]*=!1,[A-Za-z_$][\w$]*=!1,[A-Za-z_$][\w$]*;\/\*CODEX_BROWSER_IN_APP_CONFIG_V2\*\//;
+  const currentExternalGateOriginalRe = /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(`410065390`\),([A-Za-z_$][\w$]*);/;
+  const currentExternalGatePatchedRe = /[A-Za-z_$][\w$]*=\([A-Za-z_$][\w$]*\(`410065390`\),!0\),[A-Za-z_$][\w$]*;\/\*CODEX_BROWSER_EXTERNAL_GATE_V2\*\//;
+  const currentExternalConfigOriginalRe = /let ([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.runCodexInWsl\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=\2===!0\|\|\3\.kind===`wsl`,([A-Za-z_$][\w$]*);/;
+  const currentExternalConfigPatchedRe = /let [A-Za-z_$][\w$]*=\{enabled:!0,isLoading:!1\},[A-Za-z_$][\w$]*=!1,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*=!1,[A-Za-z_$][\w$]*;\/\*CODEX_BROWSER_EXTERNAL_CONFIG_V2\*\//;
+  const hasCurrentCompiledShape = before.includes('browser.in-app') &&
+    before.includes('410065390') &&
+    before.includes('410262010') &&
+    before.includes('.runCodexInWsl');
+  const currentCompiledMarkers = [
+    'CODEX_BROWSER_IN_APP_GATES_V2',
+    'CODEX_BROWSER_IN_APP_CONFIG_V2',
+    'CODEX_BROWSER_EXTERNAL_GATE_V2',
+    'CODEX_BROWSER_EXTERNAL_CONFIG_V2'
+  ];
+  if (hasCurrentCompiledShape && (
+      !(currentInAppPairOriginalRe.test(before) || currentInAppPairPatchedRe.test(before)) ||
+      !(currentInAppConfigOriginalRe.test(before) || currentInAppConfigPatchedRe.test(before)) ||
+      !(currentExternalGateOriginalRe.test(before) || currentExternalGatePatchedRe.test(before)) ||
+      !(currentExternalConfigOriginalRe.test(before) || currentExternalConfigPatchedRe.test(before)))) {
+    process.stderr.write('browser-use-current-feature-hook-incomplete\n');
+    process.exit(2);
+  }
+
+  let after = before;
+  if (hasCurrentCompiledShape) {
+    after = after.replace(
+      currentInAppPairOriginalRe,
+      'let $1=!0,$5=($6(`410262010`),!0),$7;/*CODEX_BROWSER_IN_APP_GATES_V2*/'
+    );
+    after = after.replace(
+      currentInAppConfigOriginalRe,
+      'let $1={enabled:!0,isLoading:!1},$2=!1,$3=$4($5),$6=!0,$7=!1,$8=!1,$9;/*CODEX_BROWSER_IN_APP_CONFIG_V2*/'
+    );
+    after = after.replace(
+      currentExternalGateOriginalRe,
+      '$1=($2(`410065390`),!0),$3;/*CODEX_BROWSER_EXTERNAL_GATE_V2*/'
+    );
+    after = after.replace(
+      currentExternalConfigOriginalRe,
+      'let $1={enabled:!0,isLoading:!1},$2=!1,$3=$4($5),$6=!1,$7;/*CODEX_BROWSER_EXTERNAL_CONFIG_V2*/'
+    );
+  }
+
+  after = after.replace(
     /let c=u\(s\),d=a===`chrome-extension`\|\|o&&c\.enabled&&!c\.isLoading,f=a===`chrome-extension`\?!1:c\.isLoading,p;/,
     'let c={enabled:!0,isLoading:!1},d=!0,f=!1,p;'
   );
@@ -975,7 +1341,8 @@ function patchFeatureHook(file) {
       !before.includes('i=!0,a=!0,l;') &&
       !before.includes('let u={enabled:!0,isLoading:!1},d=!1,f=!0,p=!1,_=!1,v;') &&
       !/\{enabled:!0,isLoading:!1\},[A-Za-z_$][\w$]*=!0,[A-Za-z_$][\w$]*=!1/.test(before) &&
-      !/[A-Za-z_$][\w$]*=!0,[A-Za-z_$][\w$]*=!0,[A-Za-z_$][\w$]*;/.test(before)) {
+      !/[A-Za-z_$][\w$]*=!0,[A-Za-z_$][\w$]*=!0,[A-Za-z_$][\w$]*;/.test(before) &&
+      !currentCompiledMarkers.every(marker => before.includes(marker))) {
     process.stderr.write('browser-use-feature-hook-patch-target-not-found\n');
     process.exit(2);
   }
@@ -1001,9 +1368,15 @@ function patchSidebarAvailability(file) {
     /([A-Za-z_$][\w$]*)=`in_app_browser`,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\(\{get:[A-Za-z_$][\w$]*\}\)=>\{let\{data:([A-Za-z_$][\w$]*)\}=[\s\S]*?,[A-Za-z_$][\w$]*=\5\?\.find\([A-Za-z_$][\w$]*=>[A-Za-z_$][\w$]*\.name===\1\);return \5!=null&&[A-Za-z_$][\w$]*\?\.enabled!==!1\}\)/,
     '$1=`in_app_browser`,$2=$3($4,()=>!0)'
   );
+  after = after.replace(
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\.isCapable,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(`410262010`\)/,
+    '$1=!0,$5=($6(`410262010`),!0)/*CODEX_BROWSER_IN_APP_GATES_V2*/'
+  );
   if (after === before &&
-      !before.includes('a=t(n,()=>!0)') &&
-      !before.includes('()=>!0')) {
+       !before.includes('a=t(n,()=>!0)') &&
+       !/`in_app_browser`,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*,\(\)=>!0\)/.test(before) &&
+       !/([A-Za-z_$][\w$]*)=!0,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(`410262010`\)/.test(before) &&
+       !before.includes('CODEX_BROWSER_IN_APP_GATES_V2')) {
     process.stderr.write('browser-sidebar-availability-patch-target-not-found\n');
     process.exit(2);
   }
@@ -1013,15 +1386,15 @@ function patchSidebarAvailability(file) {
 function patchDesktopFeatureSender(file) {
   const before = read(file);
   const patchedSenderFragment = 'inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,browserPane:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0,computerUse:';
-  const patchedSenderPattern = /inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,(defaultLinkOpenTargetPreference:[^,}]+,)?(linksDefaultInAppBrowser:[^,}]+,)?(localBackend:[^,}]+,)?browserPane:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0,(findShortcuts:[^,}]+,)?computerUse:/;
+  const patchedSenderPattern = /inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,((?:[A-Za-z_$][\w$]*:[^,}]+,){0,10}?)browserPane:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0,((?:[A-Za-z_$][\w$]*:[^,}]+,){0,6}?)computerUse:/;
   if (!before.includes('browser_use_availability_resolved') || !before.includes('electron-desktop-features-changed')) {
     process.stderr.write('browser-use-desktop-feature-sender-target-not-found\n');
     process.exit(2);
   }
 
   let after = before.replace(
-    /inAppBrowserUse:[^,}]+,inAppBrowserUseAllowed:[^,}]+,(defaultLinkOpenTargetPreference:[^,}]+,)?(linksDefaultInAppBrowser:[^,}]+,)?(localBackend:[^,}]+,)?browserPane:[^,}]+,externalBrowserUse:[^,}]+,externalBrowserUseAllowed:[^,}]+,(findShortcuts:[^,}]+,)?computerUse:/,
-    'inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,$1$2$3browserPane:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0,$4computerUse:'
+    /inAppBrowserUse:[^,}]+,inAppBrowserUseAllowed:[^,}]+,((?:[A-Za-z_$][\w$]*:[^,}]+,){0,10}?)browserPane:[^,}]+,externalBrowserUse:[^,}]+,externalBrowserUseAllowed:[^,}]+,((?:[A-Za-z_$][\w$]*:[^,}]+,){0,6}?)computerUse:/,
+    'inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,$1browserPane:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0,$2computerUse:'
   );
   after = after.replace(
     /browser_use_availability_resolved`,\{safe:\{available:[^,]+,platform:([^,]+),reason:[^,]+,release:([^}]+)\},sensitive:\{browserPane:[^}]+\}\}\)/,
@@ -1040,7 +1413,7 @@ function patchDesktopFeatureSender(file) {
 function patchDesktopFeatureMain(file) {
   const before = read(file);
   const patchedMainFragment = 'browserPane:!0,inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0';
-  const envGatePattern = /[A-Za-z_$][\w$]*=i===`win32`&&[A-Za-z_$][\w$]*\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.[A-Za-z_$][\w$]*,computerUse:!0,computerUseNodeRepl:!0\}:[A-Za-z_$][\w$]*/;
+  const envGatePattern = /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0,computerUseNodeRepl:!0\}:\4/;
   if (!before.includes(patchedMainFragment) &&
       (!before.includes('CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE') ||
        (!envGatePattern.test(before) &&
@@ -1050,8 +1423,8 @@ function patchDesktopFeatureMain(file) {
   }
 
   let after = before.replace(
-    /([A-Za-z_$][\w$]*)=i===`win32`&&r\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0,computerUseNodeRepl:!0\}:\2/,
-    '$1=i===`win32`?{...$2,browserPane:!0,inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0,...r.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?{computerUse:!0,computerUseNodeRepl:!0}:{}}:$2'
+    envGatePattern,
+    '$1=$2===`win32`?{...$4,browserPane:!0,inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0,...$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?{computerUse:!0,computerUseNodeRepl:!0}:{}}:$4'
   );
   after = after.replace(
     /inAppBrowserUse:[A-Za-z_$][\w$]*\.inAppBrowserUse,inAppBrowserUseAllowed:[A-Za-z_$][\w$]*\.inAppBrowserUseAllowed,browserPane:[A-Za-z_$][\w$]*\.browserPane,externalBrowserUse:[A-Za-z_$][\w$]*\.externalBrowserUse,externalBrowserUseAllowed:[A-Za-z_$][\w$]*\.externalBrowserUseAllowed,computerUse:/,
@@ -1081,17 +1454,23 @@ const text = fs.readFileSync(file, 'utf8');
 
 const copyPatchedMarker = 'codex_windows_bundled_marketplace_copy_fallback';
 const sitesPatchedMarker = 'codex_windows_sites_bundled_plugin_available';
+const deepResearchPatchedMarker = 'codex_windows_deep_research_bundled_plugin_available';
 let after = text;
 let changed = false;
 
-if (!after.includes(copyPatchedMarker)) {
+const hasNativeWindowsCopyFallback =
+  (after.includes('copyDirectoryAllowDecryptedDestinationOnEncryptionFailure') &&
+   after.includes('windows-file-copy-')) ||
+  /platform!==`win32`\)\{await [A-Za-z_$][\w$]*\.default\.cp\([^)]*\{recursive:!0,verbatimSymlinks:!0\}\);return\}/.test(after) ||
+  /require\(`\.\/windows-file-copy-[A-Za-z0-9_-]+\.js`\)/.test(after);
+
+if (!after.includes(copyPatchedMarker) && !hasNativeWindowsCopyFallback) {
   const originalRe = /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.default\.platform===`darwin`\)\{await ([A-Za-z_$][\w$]*)\(`ditto`,\[`--noqtn`,\2,\3\]\);return\}await ([A-Za-z_$][\w$]*)\.default\.cp\(\2,\3,\{recursive:!0,verbatimSymlinks:!0\}\)\}/;
   const match = after.match(originalRe);
   if (!match) {
     process.stderr.write('bundled-marketplace-copy-target-not-found\n');
     process.exit(2);
   }
-
   const matchIndex = match.index ?? 0;
   const searchStart = Math.max(0, matchIndex - 2500);
   const searchEnd = Math.min(after.length, matchIndex + 2500);
@@ -1120,6 +1499,16 @@ if (!after.includes(sitesPatchedMarker)) {
   changed = true;
 }
 
+if (!after.includes(deepResearchPatchedMarker)) {
+  const deepResearchAvailabilityRe = /isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>\1\.deepResearch/;
+  if (!deepResearchAvailabilityRe.test(after)) {
+    process.stderr.write('bundled-marketplace-deep-research-availability-target-not-found\n');
+    process.exit(2);
+  }
+  after = after.replace(deepResearchAvailabilityRe, `isAvailable:()=>!0/*${deepResearchPatchedMarker}*/`);
+  changed = true;
+}
+
 if (changed) {
   fs.writeFileSync(file, after);
   process.stdout.write('patched');
@@ -1128,17 +1517,88 @@ if (changed) {
 }
 '@
 
+  Set-Content -LiteralPath $nodeReplTrustedPathsPatcherPath -Encoding UTF8 -Value @'
+const fs = require('node:fs');
+const file = process.argv[2];
+const text = fs.readFileSync(file, 'utf8');
+const marker = 'CODEX_NODE_REPL_TRUSTED_PATHS_V1';
+const identifier = '[A-Za-z_$][\\w$]*';
+
+if (text.includes(marker)) {
+  process.stdout.write('already-patched');
+  process.exit(0);
+}
+
+const keyMatch = text.match(/([A-Za-z_$][\w$]*)=`NODE_REPL_TRUSTED_CODE_PATHS`/);
+if (!keyMatch) {
+  process.stderr.write('node-repl-trusted-paths-key-not-found\n');
+  process.exit(2);
+}
+
+const key = keyMatch[1];
+const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const originalRe = new RegExp(`\\[${escapedKey}\\]:(${identifier})\\(\\[(${identifier}),(${identifier})\\],(${identifier})\\)`);
+const patchedRe = new RegExp(`\\[${escapedKey}\\]:${identifier}\\(\\[${identifier},${identifier},process\\.env\\[${escapedKey}\\](?:\\?\\?\`\`)?\\],${identifier}\\)`);
+if (patchedRe.test(text)) {
+  process.stdout.write('already-patched');
+  process.exit(0);
+}
+
+const match = text.match(originalRe);
+if (!match) {
+  process.stderr.write('node-repl-trusted-paths-target-not-found\n');
+  process.exit(2);
+}
+
+const [, joinFunction, codexHome, nodeModuleDirs, platform] = match;
+const replacement = `[${key}]:${joinFunction}([${codexHome},${nodeModuleDirs},process.env[${key}]??\`\`],${platform})/*${marker}*/`;
+const next = text.replace(originalRe, replacement);
+fs.writeFileSync(file, next);
+process.stdout.write('patched');
+'@
+
   return [pscustomobject]@{
     Fast = $fastPatcherPath
     FastUi = $fastUiPatcherPath
     CustomModels = $customModelsPatcherPath
+    PowerSlider = $powerSliderPatcherPath
+    UltraSlider = $ultraSliderPatcherPath
     LocaleI18n = $localePatcherPath
     Plugins = $pluginsPatcherPath
     Goal = $goalPatcherPath
     ComputerUse = $computerUsePatcherPath
     BrowserUse = $browserUsePatcherPath
     BundledMarketplaceCopy = $bundledMarketplaceCopyPatcherPath
+    NodeReplTrustedPaths = $nodeReplTrustedPathsPatcherPath
   }
+}
+
+function Test-CustomModelVisibilityExpression {
+  param(
+    [AllowNull()]
+    [string]$Text
+  )
+
+  if ([string]::IsNullOrEmpty($Text)) {
+    return $false
+  }
+  if ($Text.Contains('CODEX_CUSTOM_MODELS_V1')) {
+    return $true
+  }
+
+  # Keep target discovery aligned with the embedded Node patcher's supported predicate shapes.
+  $patterns = @(
+    'if\([$A-Za-z_][$\w]*\?[$A-Za-z_][$\w]*\.has\((?<model>[$A-Za-z_][$\w]*)\.model\):!\k<model>\.hidden\)\{',
+    'if\([$A-Za-z_][$\w]*\?\.has\((?<model>[$A-Za-z_][$\w]*)\.model\)===!0\|\|\([$A-Za-z_][$\w]*\?[$A-Za-z_][$\w]*\.has\(\k<model>\.model\):!\k<model>\.hidden\)\)\{',
+    '\?\.has\(\w+\.model\)===!0\|\|\(\w+(?:&&\w+!==`amazonBedrock`)?\?\w+\.has\(\w+\.model\):!\w+\.hidden\)',
+    '\?\.has\((?<model>[$A-Za-z_][$\w]*)\.model\)===!0\|\|\k<model>\.model!==`codex-auto-review`&&\((?<showHidden>[$A-Za-z_][$\w]*)&&!(?<customProvider>[$A-Za-z_][$\w]*)&&(?<authMethod>[$A-Za-z_][$\w]*)!==`amazonBedrock`\?(?<availableModels>[$A-Za-z_][$\w]*)\.has\(\k<model>\.model\):!\k<model>\.hidden\)'
+  )
+  foreach ($pattern in $patterns) {
+    if ($Text -match $pattern) {
+      return $true
+    }
+  }
+  return $false
 }
 
 function Find-PatchTargets {
@@ -1179,6 +1639,18 @@ function Find-PatchTargets {
       break
     }
   }
+  if ([string]::IsNullOrWhiteSpace($fastModeUiTarget)) {
+    foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'app-initial-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+      $text = Get-Content -Raw -LiteralPath $candidate
+      if ($text.Contains('isServiceTierAllowed') -and
+          $text.Contains('featureRequirements?.fast_mode') -and
+          (($text -match '=!!\w+\?\.isLoading\|\|\w+&&\w+,\w+=\w+&&!\w+&&\w+!=null&&\w+\?\.requirements\?\.featureRequirements\?\.fast_mode!==!1') -or
+           ($text -match '=!!\w+\?\.isLoading\|\|\w+,\w+=!\w+&&\w+!=null&&\w+\?\.requirements\?\.featureRequirements\?\.fast_mode!==!1'))) {
+        $fastModeUiTarget = $candidate
+        break
+      }
+    }
+  }
   $customModelsTarget = $null
   foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'model-list-filter-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
     $text = Get-Content -Raw -LiteralPath $candidate
@@ -1189,8 +1661,53 @@ function Find-PatchTargets {
     }
   }
   if ([string]::IsNullOrWhiteSpace($customModelsTarget)) {
+    foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'app-initial-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+      $text = Get-Content -Raw -LiteralPath $candidate
+      if ($text.Contains('available_models') -and
+          $text.Contains('useHiddenModels') -and
+          $text.Contains('supportedReasoningEfforts') -and
+          (Test-CustomModelVisibilityExpression -Text $text)) {
+        $customModelsTarget = $candidate
+        break
+      }
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($customModelsTarget)) {
     Fail 'could not find custom model visibility filter in extracted assets'
   }
+  $powerSliderTarget = $null
+  foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'model-and-reasoning-dropdown-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+    $text = Get-Content -Raw -LiteralPath $candidate
+    if ($text.Contains('harborEnabled:') -and
+        $text.Contains('isElectron:') -and
+        $text.Contains('isEverydayWorkMode:') -and
+        $text.Contains('model-picker-power-slider-impl')) {
+      $powerSliderTarget = $candidate
+      break
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($powerSliderTarget)) {
+    foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'model-picker-power-slider-impl-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+      $text = Get-Content -Raw -LiteralPath $candidate
+      if ($text.Contains('PowerSlider')) {
+        $powerSliderTarget = $candidate
+        break
+      }
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($powerSliderTarget)) {
+    foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter '*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+      $text = Get-Content -Raw -LiteralPath $candidate
+      if ($text.Contains('ModelPickerPowerSliderImpl')) {
+        $powerSliderTarget = $candidate
+        break
+      }
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($powerSliderTarget)) {
+    Fail 'could not find compact Power slider harbor gate in extracted assets'
+  }
+  $ultraSliderTarget = Find-UltraSliderTarget $RgPath $assetsDir
   $localeI18nTarget = $null
   $localeCandidates = @(
     Invoke-RgList $RgPath 'enable_i18n' $assetsDir
@@ -1221,6 +1738,23 @@ function Find-PatchTargets {
       break
     }
   }
+  if ([string]::IsNullOrWhiteSpace($browserSidebarAvailabilityTarget)) {
+    foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'app-initial-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+      $text = Get-Content -Raw -LiteralPath $candidate
+      if ($text.Contains('in_app_browser') -and
+           $text.Contains('experimental-features') -and
+           (($text -match '`in_app_browser`,\w+=\w+\(\w+,\(\{get:\w+\}\)=>\{let\{data:\w+\}=.+?;return \w+!=null&&\w+\?\.enabled!==!1\}\)') -or
+           ($text -match '`in_app_browser`,\w+=\w+\(\w+,\(\)=>!0\)') -or
+           ($text.Contains('CODEX_BROWSER_IN_APP_GATES_V2')) -or
+           ($text.Contains('browser.in-app') -and
+            $text.Contains('featureName:`browser_use`') -and
+            $text.Contains('410262010') -and
+            $text -match '[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\.isCapable,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(`410262010`\)'))) {
+        $browserSidebarAvailabilityTarget = $candidate
+        break
+      }
+    }
+  }
   $desktopFeatureSenderTarget = $null
   $desktopFeatureSenderCandidates = @(
     Invoke-RgList $RgPath 'browser_use_availability_resolved' $assetsDir
@@ -1229,8 +1763,8 @@ function Find-PatchTargets {
   foreach ($candidate in $desktopFeatureSenderCandidates) {
     $text = Get-Content -Raw -LiteralPath $candidate
     if ($text.Contains('electron-desktop-features-changed') -and
-        (($text -match 'inAppBrowserUse:[^,}]+,inAppBrowserUseAllowed:[^,}]+,(defaultLinkOpenTargetPreference:[^,}]+,)?(linksDefaultInAppBrowser:[^,}]+,)?(localBackend:[^,}]+,)?browserPane:[^,}]+,externalBrowserUse:[^,}]+,externalBrowserUseAllowed:[^,}]+,(findShortcuts:[^,}]+,)?computerUse:[^,}]+') -or
-         ($text -match 'inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,(defaultLinkOpenTargetPreference:[^,}]+,)?(linksDefaultInAppBrowser:[^,}]+,)?(localBackend:[^,}]+,)?browserPane:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0'))) {
+        (($text -match 'inAppBrowserUse:[^,}]+,inAppBrowserUseAllowed:[^,}]+,(?:[A-Za-z_$][\w$]*:[^,}]+,)*?browserPane:[^,}]+,externalBrowserUse:[^,}]+,externalBrowserUseAllowed:[^,}]+,(?:[A-Za-z_$][\w$]*:[^,}]+,)*?computerUse:[^,}]+') -or
+         ($text -match 'inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,(?:[A-Za-z_$][\w$]*:[^,}]+,)*?browserPane:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0'))) {
       $desktopFeatureSenderTarget = $candidate
       break
     }
@@ -1245,7 +1779,7 @@ function Find-PatchTargets {
     foreach ($candidate in $desktopFeatureMainCandidates) {
       $text = Get-Content -Raw -LiteralPath $candidate
       if ($text.Contains('CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE') -and
-          (($text -match '[A-Za-z_$][\w$]*=i===`win32`&&[A-Za-z_$][\w$]*\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.[A-Za-z_$][\w$]*,computerUse:!0,computerUseNodeRepl:!0\}:[A-Za-z_$][\w$]*') -or
+          (($text -match '([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0,computerUseNodeRepl:!0\}:\4') -or
            ($text -match 'inAppBrowserUse:[A-Za-z_$][\w$]*\.inAppBrowserUse,inAppBrowserUseAllowed:[A-Za-z_$][\w$]*\.inAppBrowserUseAllowed,browserPane:[A-Za-z_$][\w$]*\.browserPane,externalBrowserUse:[A-Za-z_$][\w$]*\.externalBrowserUse,externalBrowserUseAllowed:[A-Za-z_$][\w$]*\.externalBrowserUseAllowed') -or
            $text.Contains('browserPane:!0,inAppBrowserUse:!0,inAppBrowserUseAllowed:!0,externalBrowserUse:!0,externalBrowserUseAllowed:!0'))) {
         $desktopFeatureMainTarget = $candidate
@@ -1262,7 +1796,9 @@ function Find-PatchTargets {
     if ($text.Contains('openPluginInstall') -and
         $text.Contains('authMethod:') -and
       (($text -match '\{authMethod:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),(?:\{data:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),)?[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),') -or
-       ($text -match '\{authMethod:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),(?:\{data:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),)?[A-Za-z_$][\w$]*=!1,'))) {
+       ($text -match '\{authMethod:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),(?:\{data:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),)?[A-Za-z_$][\w$]*=!1,') -or
+       ($text -match '\{authMethod:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*\(\),[^;]{0,2500}?[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\1\),[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.kind===`manage`,') -or
+       ($text -match '\{authMethod:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\(\),[^;]{0,2500}?[A-Za-z_$][\w$]*=!1,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.kind===`manage`,'))) {
       $pluginPageAuthTarget = $candidate
       break
     }
@@ -1293,7 +1829,7 @@ function Find-PatchTargets {
                            -not [string]::IsNullOrWhiteSpace($pluginSkillsTarget) -and
                            -not [string]::IsNullOrWhiteSpace($pluginDetailTarget)
   if (-not $oldPluginTargetsFound -and [string]::IsNullOrWhiteSpace($pluginPageAuthTarget)) {
-    Fail 'could not find plugin auth patch target in extracted assets'
+    Write-Log 'plugin auth gate not found; treating current build as already open or migrated'
   }
 
   $goalComposerTarget = $null
@@ -1360,6 +1896,17 @@ function Find-PatchTargets {
     }
   }
   if ([string]::IsNullOrWhiteSpace($goalSlashTarget)) {
+    foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'app-initial-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+      $text = Get-Content -Raw -LiteralPath $candidate
+      if ($text.Contains('id:`goal`') -and
+          $text.Contains('getSearchQuery') -and
+          $text -match 'Math\.max\([A-Za-z_$][\w$]*\(e\.title,[A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*\(e\.id,[A-Za-z_$][\w$]*\),\.\.\.\(e\.searchAliases\?\?\[\]\)\.map') {
+        $goalSlashTarget = $candidate
+        break
+      }
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($goalSlashTarget)) {
     Fail 'could not find goal slash-command matcher in extracted assets'
   }
 
@@ -1379,7 +1926,11 @@ function Find-PatchTargets {
     }
   }
   if ([string]::IsNullOrWhiteSpace($computerUseInstallFlowTarget)) {
-    foreach ($candidate in (Invoke-RgList $RgPath 'installPlugin:async' $assetsDir)) {
+    $computerUseInstallFlowCandidates = @(
+      Invoke-RgList $RgPath 'installPlugin:async' $assetsDir
+      Invoke-RgList $RgPath 'install-plugin' $assetsDir
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+    foreach ($candidate in $computerUseInstallFlowCandidates) {
       $text = Get-Content -Raw -LiteralPath $candidate
       if ($text.Contains('openPluginInstall') -and
           (($text -match '=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,') -or
@@ -1393,7 +1944,7 @@ function Find-PatchTargets {
     Fail 'could not find Computer Use availability gate in extracted assets'
   }
   if ([string]::IsNullOrWhiteSpace($computerUseInstallFlowTarget)) {
-    Fail 'could not find Computer Use install-flow gate in extracted assets'
+    Write-Log 'Computer Use install-flow gate not found; treating current build as already open or migrated'
   }
 
   $computerUseSetupTarget = $null
@@ -1406,6 +1957,20 @@ function Find-PatchTargets {
   }
   if ([string]::IsNullOrWhiteSpace($computerUseSetupTarget)) {
     Fail 'could not find Computer Use setup gate in extracted assets'
+  }
+
+  $nodeReplTrustedPathsTarget = $null
+  foreach ($candidate in (Invoke-RgList $RgPath 'NODE_REPL_TRUSTED_CODE_PATHS' $viteBuildDir)) {
+    $text = Get-Content -Raw -LiteralPath $candidate
+    if ($text.Contains('NODE_REPL_NODE_MODULE_DIRS') -and
+        ($text.Contains('CODEX_NODE_REPL_TRUSTED_PATHS_V1') -or
+         $text -match '\[[A-Za-z_$][\w$]*\]:[A-Za-z_$][\w$]*\(\[[A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\],[A-Za-z_$][\w$]*\)')) {
+      $nodeReplTrustedPathsTarget = $candidate
+      break
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($nodeReplTrustedPathsTarget)) {
+    Fail 'could not find Node REPL trusted-code-path generator in extracted main bundle'
   }
 
   $bundledMarketplaceCopyTarget = $null
@@ -1425,6 +1990,8 @@ function Find-PatchTargets {
   Write-Log "fast-mode patch target: $fastModeTarget"
   Write-Log "fast-mode UI patch target: $fastModeUiTarget"
   Write-Log "custom models patch target: $customModelsTarget"
+  Write-Log "Power slider patch target: $powerSliderTarget"
+  Write-Log "Ultra slider local-fallback patch target: $ultraSliderTarget"
   Write-Log "locale i18n patch target: $localeI18nTarget"
   Write-Log "plugin sidebar patch target: $pluginSidebarTarget"
   Write-Log "plugin skills-page patch target: $pluginSkillsTarget"
@@ -1439,12 +2006,15 @@ function Find-PatchTargets {
   Write-Log "computer-use availability patch target: $computerUseAvailabilityTarget"
   Write-Log "computer-use install-flow patch target: $computerUseInstallFlowTarget"
   Write-Log "computer-use setup patch target: $computerUseSetupTarget"
+  Write-Log "Node REPL trusted-paths patch target: $nodeReplTrustedPathsTarget"
   Write-Log "bundled marketplace copy patch target: $bundledMarketplaceCopyTarget"
 
   return [pscustomobject]@{
     FastMode = $fastModeTarget
     FastModeUi = $fastModeUiTarget
     CustomModels = $customModelsTarget
+    PowerSlider = $powerSliderTarget
+    UltraSlider = $ultraSliderTarget
     LocaleI18n = $localeI18nTarget
     PluginSidebar = $pluginSidebarTarget
     PluginSkills = $pluginSkillsTarget
@@ -1459,6 +2029,7 @@ function Find-PatchTargets {
     ComputerUseAvailability = $computerUseAvailabilityTarget
     ComputerUseInstallFlow = $computerUseInstallFlowTarget
     ComputerUseSetup = $computerUseSetupTarget
+    NodeReplTrustedPaths = $nodeReplTrustedPathsTarget
     BundledMarketplaceCopy = $bundledMarketplaceCopyTarget
   }
 }
@@ -1535,6 +2106,18 @@ function Invoke-PatchAppAsar {
       }
     }
     if ([string]::IsNullOrWhiteSpace($fastModeUiTarget)) {
+      foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'app-initial-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+        $text = Get-Content -Raw -LiteralPath $candidate
+        if ($text.Contains('isServiceTierAllowed') -and
+            $text.Contains('featureRequirements?.fast_mode') -and
+            (($text -match '=!!\w+\?\.isLoading\|\|\w+&&\w+,\w+=\w+&&!\w+&&\w+!=null&&\w+\?\.requirements\?\.featureRequirements\?\.fast_mode!==!1') -or
+             ($text -match '=!!\w+\?\.isLoading\|\|\w+,\w+=!\w+&&\w+!=null&&\w+\?\.requirements\?\.featureRequirements\?\.fast_mode!==!1'))) {
+          $fastModeUiTarget = $candidate
+          break
+        }
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($fastModeUiTarget)) {
       Fail 'could not find Model Experience Fast Mode UI target'
     }
 
@@ -1548,18 +2131,69 @@ function Invoke-PatchAppAsar {
       }
     }
     if ([string]::IsNullOrWhiteSpace($customModelsTarget)) {
+      foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'app-initial-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+        $text = Get-Content -Raw -LiteralPath $candidate
+        if ($text.Contains('available_models') -and
+            $text.Contains('useHiddenModels') -and
+            $text.Contains('supportedReasoningEfforts') -and
+            (Test-CustomModelVisibilityExpression -Text $text)) {
+          $customModelsTarget = $candidate
+          break
+        }
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($customModelsTarget)) {
       Fail 'could not find custom model visibility filter in extracted assets'
     }
+    $powerSliderTarget = $null
+    foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'model-and-reasoning-dropdown-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+      $text = Get-Content -Raw -LiteralPath $candidate
+      if ($text.Contains('harborEnabled:') -and
+          $text.Contains('isElectron:') -and
+          $text.Contains('isEverydayWorkMode:') -and
+          $text.Contains('model-picker-power-slider-impl')) {
+        $powerSliderTarget = $candidate
+        break
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($powerSliderTarget)) {
+      foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'model-picker-power-slider-impl-*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+        $text = Get-Content -Raw -LiteralPath $candidate
+        if ($text.Contains('PowerSlider')) {
+          $powerSliderTarget = $candidate
+          break
+        }
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($powerSliderTarget)) {
+      foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter '*.js' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)) {
+        $text = Get-Content -Raw -LiteralPath $candidate
+        if ($text.Contains('ModelPickerPowerSliderImpl')) {
+          $powerSliderTarget = $candidate
+          break
+        }
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($powerSliderTarget)) {
+      Fail 'could not find Model Experience compact Power slider harbor gate'
+    }
+    $ultraSliderTarget = Find-UltraSliderTarget $rgPath $assetsDir
     Write-Log "Model Experience Fast Mode request target: $fastModeTarget"
     Write-Log "Model Experience Fast Mode UI target: $fastModeUiTarget"
     Write-Log "Model Experience custom models target: $customModelsTarget"
+    Write-Log "Model Experience Power slider target: $powerSliderTarget"
+    Write-Log "Model Experience Ultra slider local-fallback target: $ultraSliderTarget"
     $fastModeResult = Invoke-NodePatcher $nodePath $patchers.Fast @($fastModeTarget)
     Write-Log "Model Experience Fast Mode request result: $fastModeResult"
     $fastModeUiResult = Invoke-NodePatcher $nodePath $patchers.FastUi @($fastModeUiTarget)
     Write-Log "Model Experience Fast Mode UI result: $fastModeUiResult"
     $customModelsResult = Invoke-NodePatcher $nodePath $patchers.CustomModels (@($customModelsTarget) + @($CustomModels))
     Write-Log "Model Experience custom models result: $customModelsResult ($($CustomModels -join ', '))"
-    foreach ($syntaxTarget in @($fastModeTarget, $fastModeUiTarget, $customModelsTarget)) {
+    $powerSliderResult = Invoke-NodePatcher $nodePath $patchers.PowerSlider @($powerSliderTarget)
+    Write-Log "Model Experience Power slider result: $powerSliderResult"
+    $ultraSliderResult = Invoke-NodePatcher $nodePath $patchers.UltraSlider @($(if ([string]::IsNullOrWhiteSpace($ultraSliderTarget)) { '__none__' } else { $ultraSliderTarget }))
+    Write-Log "Model Experience Ultra slider local-fallback result: $ultraSliderResult"
+    foreach ($syntaxTarget in @($fastModeTarget, $fastModeUiTarget, $customModelsTarget, $powerSliderTarget, $ultraSliderTarget) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique) {
       & $nodePath --check $syntaxTarget
       if ($LASTEXITCODE -ne 0) {
         Fail "Model Experience patched asset failed node --check: $syntaxTarget"
@@ -1573,7 +2207,9 @@ function Invoke-PatchAppAsar {
     }
     if ($fastModeResult -eq 'already-patched' -and
         $fastModeUiResult -eq 'already-patched' -and
-        $customModelsResult -eq 'already-patched') {
+        $customModelsResult -eq 'already-patched' -and
+        $powerSliderResult -eq 'already-patched' -and
+        $ultraSliderResult -in @('already-patched', 'not-applicable')) {
       Write-Log 'asar Model Experience patches already present'
       return $false
     }
@@ -1627,6 +2263,10 @@ function Invoke-PatchAppAsar {
   Write-Log "fast-mode UI patch result: $fastUi"
   $customModels = Invoke-NodePatcher $nodePath $patchers.CustomModels (@($targets.CustomModels) + @($CustomModels))
   Write-Log "custom models patch result: $customModels ($($CustomModels -join ', '))"
+  $powerSlider = Invoke-NodePatcher $nodePath $patchers.PowerSlider @($targets.PowerSlider)
+  Write-Log "Power slider patch result: $powerSlider"
+  $ultraSlider = Invoke-NodePatcher $nodePath $patchers.UltraSlider @($(if ([string]::IsNullOrWhiteSpace($targets.UltraSlider)) { '__none__' } else { [string]$targets.UltraSlider }))
+  Write-Log "Ultra slider local-fallback patch result: $ultraSlider"
 
   $localeI18n = Invoke-NodePatcher $nodePath $patchers.LocaleI18n @($targets.LocaleI18n)
   Write-Log "locale i18n patch result: $localeI18n"
@@ -1648,13 +2288,21 @@ function Invoke-PatchAppAsar {
   Write-Log "browser-use gate patch result: $browserUse"
   $computerUseArgs = @(
     [string]$targets.ComputerUseAvailability
-    [string]$targets.ComputerUseInstallFlow
+    $(if ([string]::IsNullOrWhiteSpace($targets.ComputerUseInstallFlow)) { '__none__' } else { [string]$targets.ComputerUseInstallFlow })
     [string]$targets.ComputerUseSetup
   )
   $computerUse = Invoke-NodePatcher $nodePath $patchers.ComputerUse $computerUseArgs
   Write-Log "computer-use gate patch result: $computerUse"
+  $nodeReplTrustedPaths = Invoke-NodePatcher $nodePath $patchers.NodeReplTrustedPaths @($targets.NodeReplTrustedPaths)
+  Write-Log "Node REPL trusted-paths patch result: $nodeReplTrustedPaths"
   $bundledMarketplaceCopy = Invoke-NodePatcher $nodePath $patchers.BundledMarketplaceCopy @($targets.BundledMarketplaceCopy)
   Write-Log "bundled marketplace copy patch result: $bundledMarketplaceCopy"
+
+  & $nodePath --check $targets.NodeReplTrustedPaths
+  if ($LASTEXITCODE -ne 0) {
+    Fail "Node REPL trusted-paths target failed node --check: $($targets.NodeReplTrustedPaths)"
+  }
+  Write-Log 'Node REPL trusted-paths syntax check passed'
 
   if ($DryRun) {
     Write-Log 'dry run: patch target validation completed; no package was changed'
@@ -1664,11 +2312,14 @@ function Invoke-PatchAppAsar {
   if ($fast -eq 'already-patched' -and
       $fastUi -eq 'already-patched' -and
       $customModels -eq 'already-patched' -and
+      $powerSlider -eq 'already-patched' -and
+      $ultraSlider -in @('already-patched', 'not-applicable') -and
       $localeI18n -eq 'already-patched' -and
       $plugins -eq 'already-patched' -and
       $goal -eq 'already-patched' -and
       $browserUse -eq 'already-patched' -and
       $computerUse -eq 'already-patched' -and
+      $nodeReplTrustedPaths -eq 'already-patched' -and
       $bundledMarketplaceCopy -eq 'already-patched') {
     Write-Log 'asar patch already present'
     return $false
@@ -1765,10 +2416,30 @@ function Get-ManifestPublisher {
   return $manifest.Package.Identity.Publisher
 }
 
+function Test-CodeSigningCertificate {
+  param([object]$Certificate)
+  $codeSigningOid = '1.3.6.1.5.5.7.3.3'
+  foreach ($usage in @($Certificate.EnhancedKeyUsageList)) {
+    $objectId = [string]$usage.ObjectId
+    if ([string]::IsNullOrWhiteSpace($objectId)) {
+      $objectId = [string]$usage.ObjectId.Value
+    }
+    if ($objectId -eq $codeSigningOid) {
+      return $true
+    }
+  }
+  return $false
+}
+
 function Get-OrCreateSigningCertificate {
   param([string]$Publisher)
-  $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue |
-    Where-Object { $_.Subject -eq $Publisher } |
+  $cert = Get-ChildItem Cert:\CurrentUser\My -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Subject -eq $Publisher -and
+      $_.HasPrivateKey -and
+      $_.NotAfter -gt (Get-Date) -and
+      (Test-CodeSigningCertificate $_)
+    } |
     Sort-Object NotAfter -Descending |
     Select-Object -First 1
   if ($cert) {
@@ -1781,15 +2452,29 @@ function Get-OrCreateSigningCertificate {
 
 function Trust-SigningCertificate {
   param([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert)
-  $tempCert = Join-Path $env:TEMP ('codex-msix-signing-' + $Cert.Thumbprint + '.cer')
-  Export-Certificate -Cert $Cert -FilePath $tempCert -Force | Out-Null
-  Import-Certificate -FilePath $tempCert -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-  Import-Certificate -FilePath $tempCert -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+  $storeTargets = @(
+    [pscustomobject]@{ Name = 'Root'; Location = [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser },
+    [pscustomobject]@{ Name = 'TrustedPeople'; Location = [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser }
+  )
   if (Test-IsAdministrator) {
-    Import-Certificate -FilePath $tempCert -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-    Import-Certificate -FilePath $tempCert -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+    $storeTargets += @(
+      [pscustomobject]@{ Name = 'Root'; Location = [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine },
+      [pscustomobject]@{ Name = 'TrustedPeople'; Location = [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine }
+    )
   }
-  Remove-Item -LiteralPath $tempCert -Force -ErrorAction SilentlyContinue
+
+  foreach ($target in $storeTargets) {
+    $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($target.Name, $target.Location)
+    try {
+      $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+      if (-not ($store.Certificates | Where-Object { $_.Thumbprint -eq $Cert.Thumbprint })) {
+        $store.Add($Cert)
+      }
+    } finally {
+      $store.Close()
+    }
+  }
+  Write-Log "trusted signing certificate in CurrentUser Root/TrustedPeople: $($Cert.Thumbprint)"
 }
 
 function Invoke-MakeAppxPack {
@@ -1824,14 +2509,15 @@ function Invoke-SignPackage {
 function Stop-CodexDesktopProcesses {
   param([string]$InstallLocation)
   $targetRoot = if ($InstallLocation) { $InstallLocation.TrimEnd('\') } else { $null }
-  $processes = Get-Process -Name 'Codex' -ErrorAction SilentlyContinue | Where-Object {
+  $processes = Get-Process -Name 'Codex', 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object {
     $_.Path -and (
       ($targetRoot -and $_.Path.StartsWith($targetRoot, [StringComparison]::OrdinalIgnoreCase)) -or
-      $_.Path -like '*\WindowsApps\OpenAI.Codex_*\app\Codex.exe'
+      $_.Path -like '*\WindowsApps\OpenAI.Codex_*\app\Codex.exe' -or
+      $_.Path -like '*\WindowsApps\OpenAI.Codex_*\app\ChatGPT.exe'
     )
   }
   foreach ($p in $processes) {
-    Write-Log "stopping Codex desktop process pid=$($p.Id)"
+    Write-Log "stopping Codex package process name=$($p.ProcessName) pid=$($p.Id)"
     Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
   }
 }
@@ -1857,9 +2543,27 @@ function Install-PatchedPackage {
   $installed = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction Stop | Select-Object -First 1
   Write-Log "installed package: $($installed.PackageFullName)"
   if ($Launch -and -not $NoLaunch) {
-    $appUserModelId = "$($installed.PackageFamilyName)!App"
+    $application = @(Get-AppxPackageManifest -Package $installed).Package.Applications.Application | Select-Object -First 1
+    $appUserModelId = "$($installed.PackageFamilyName)!$($application.Id)"
+    $appExecutable = Join-Path $installed.InstallLocation ([string]$application.Executable).Replace('/', '\')
     Write-Log "launching Codex package app: $appUserModelId"
     Start-Process -FilePath 'explorer.exe' -ArgumentList "shell:AppsFolder\$appUserModelId"
+
+    $deadline = (Get-Date).AddSeconds(20)
+    $desktopProcess = $null
+    while (-not $desktopProcess -and (Get-Date) -lt $deadline) {
+      Start-Sleep -Milliseconds 500
+      $desktopProcess = Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($appExecutable)) -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.Equals($appExecutable, [StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -First 1
+    }
+    if (-not $desktopProcess) {
+      Fail "Codex Desktop executable did not start: $appExecutable"
+    }
+
+    # A second activation makes an already-running Electron instance surface its window.
+    Start-Process -FilePath 'explorer.exe' -ArgumentList "shell:AppsFolder\$appUserModelId"
+    Write-Log "Codex Desktop package process started: $appExecutable pid=$($desktopProcess.Id)"
   }
 }
 
@@ -1873,8 +2577,16 @@ function Find-CodexCli {
       return $hit.FullName
     }
   }
+
+  if (-not [string]::IsNullOrWhiteSpace($script:workApp)) {
+    $workCli = Join-Path $script:workApp 'resources\codex.exe'
+    if (Test-Path -LiteralPath $workCli -PathType Leaf) {
+      return $workCli
+    }
+  }
+
   $cmd = Get-Command codex.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($cmd) {
+  if ($cmd -and $cmd.Source -notlike '*\WindowsApps\OpenAI.Codex_*\app\resources\codex.exe') {
     return $cmd.Source
   }
   return $null
@@ -1914,12 +2626,58 @@ function Add-LocalMarketplace {
   }
 }
 
+function Patch-ChromePluginWindowsRegistryParsing {
+  param([string]$WorkApp)
+
+  $chromePluginRoot = Join-Path $WorkApp 'resources\plugins\openai-bundled\plugins\chrome'
+  if (-not (Test-Path -LiteralPath $chromePluginRoot -PathType Container)) {
+    return 'not-present'
+  }
+
+  $changed = $false
+  $genericOld = 'if (match && match[1] === label) return stripRegistryString(match[2]);'
+  $genericNew = 'if (match && (valueName == null || match[1] === label)) return stripRegistryString(match[2]);'
+  foreach ($relativePath in @('scripts\open-chrome-window.js', 'scripts\installed-browsers.js')) {
+    $path = Join-Path $chromePluginRoot $relativePath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+      continue
+    }
+    $content = [System.IO.File]::ReadAllText($path, [System.Text.UTF8Encoding]::new($false))
+    if ($content.Contains($genericNew)) {
+      continue
+    }
+    if (-not $content.Contains($genericOld)) {
+      Write-Log "warning: Chrome registry parser anchor not found: $path"
+      continue
+    }
+    [System.IO.File]::WriteAllText($path, $content.Replace($genericOld, $genericNew), [System.Text.UTF8Encoding]::new($false))
+    $changed = $true
+  }
+
+  $nativeHostPath = Join-Path $chromePluginRoot 'scripts\check-native-host-manifest.js'
+  if (Test-Path -LiteralPath $nativeHostPath -PathType Leaf) {
+    $nativeOld = 'if (match && match[1] === valueName) return stripRegistryString(match[2]);'
+    $nativeNew = 'if (match && (valueName === "(Default)" || match[1] === valueName)) return stripRegistryString(match[2]);'
+    $nativeContent = [System.IO.File]::ReadAllText($nativeHostPath, [System.Text.UTF8Encoding]::new($false))
+    if (-not $nativeContent.Contains($nativeNew)) {
+      if ($nativeContent.Contains($nativeOld)) {
+        [System.IO.File]::WriteAllText($nativeHostPath, $nativeContent.Replace($nativeOld, $nativeNew), [System.Text.UTF8Encoding]::new($false))
+        $changed = $true
+      } else {
+        Write-Log "warning: Chrome native-host registry parser anchor not found: $nativeHostPath"
+      }
+    }
+  }
+
+  return $(if ($changed) { 'patched' } else { 'already-patched' })
+}
+
 function Invoke-FastModeVerification {
   $codex = Find-CodexCli
   if (-not $codex) {
-    Write-Log 'fast verification skipped: codex CLI not found'
-    return
+    Fail 'fast verification requires a runnable codex CLI outside the protected WindowsApps package path'
   }
+  Write-Log "fast verification CLI: $codex"
 
   $node = (Get-RequiredCommand 'node').Source
   $captureDir = Join-Path $env:TEMP ('codex-fast-wire-' + [guid]::NewGuid().ToString('N'))
@@ -1932,12 +2690,24 @@ function Invoke-FastModeVerification {
 const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
+const zlib = require("zlib");
 
 const port = Number(process.argv[2]);
 const outPath = process.argv[3];
 
 function write(obj) {
   fs.appendFileSync(outPath, JSON.stringify(obj) + "\n");
+}
+
+function getServiceTier(text) {
+  try {
+    const payload = JSON.parse(text);
+    if (typeof payload.service_tier === "string") return payload.service_tier;
+  } catch {
+    // WebSocket payloads can wrap the request JSON, so fall back to a text match.
+  }
+  const match = String(text).match(/"service_tier"\s*:\s*"([^"]+)"/);
+  return match ? match[1] : null;
 }
 
 function decodeFrames(buffer) {
@@ -1979,9 +2749,44 @@ function decodeFrames(buffer) {
 }
 
 const server = http.createServer((req, res) => {
-  write({ kind: "http", method: req.method, url: req.url });
-  res.writeHead(404);
-  res.end();
+  if (req.method === "GET" && req.url.startsWith("/v1/models")) {
+    write({ kind: "http", method: req.method, url: req.url, service_tier: null });
+    const body = JSON.stringify({
+      object: "list",
+      data: [{ id: "gpt-5.6-sol", object: "model", created: 0, owned_by: "openai" }],
+    });
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(body),
+    });
+    res.end(body);
+    return;
+  }
+  const chunks = [];
+  req.on("data", (chunk) => chunks.push(chunk));
+  req.on("end", () => {
+    let body = Buffer.concat(chunks);
+    const encoding = String(req.headers["content-encoding"] || "").toLowerCase();
+    try {
+      if (encoding.includes("gzip")) body = zlib.gunzipSync(body);
+      else if (encoding.includes("deflate")) body = zlib.inflateSync(body);
+      else if (encoding.includes("br")) body = zlib.brotliDecompressSync(body);
+      else if (encoding.includes("zstd") && zlib.zstdDecompressSync) body = zlib.zstdDecompressSync(body);
+    } catch {
+      // Keep the raw body if a future client uses an encoding this runtime cannot decode.
+    }
+    const text = body.toString("utf8");
+    const isResponsesRequest = req.url === "/v1/responses" || req.url.startsWith("/v1/responses?");
+    write({
+      kind: "http",
+      method: req.method,
+      url: req.url,
+      service_tier: isResponsesRequest ? getServiceTier(text) : null,
+    });
+    const response = Buffer.from(JSON.stringify({ error: { message: "capture complete", type: "invalid_request_error" } }));
+    res.writeHead(400, { "Content-Type": "application/json", "Content-Length": response.length });
+    res.end(response);
+  });
 });
 
 server.on("upgrade", (req, socket, head) => {
@@ -2005,7 +2810,10 @@ server.on("upgrade", (req, socket, head) => {
     const decoded = decodeFrames(pending);
     pending = Buffer.from(decoded.rest);
     for (const frame of decoded.frames) {
-      if (frame.opcode === 1) write({ kind: "frame", text: frame.text });
+      if (frame.opcode === 1) {
+        const isResponsesRequest = req.url === "/v1/responses" || req.url.startsWith("/v1/responses?");
+        write({ kind: "frame", url: req.url, service_tier: isResponsesRequest ? getServiceTier(frame.text) : null });
+      }
       if (frame.opcode === 8) socket.destroy();
     }
   }
@@ -2018,10 +2826,12 @@ server.listen(port, "127.0.0.1", () => {
   fs.writeFileSync(outPath + ".ready", "ready");
 });
 
-setTimeout(() => server.close(() => process.exit(0)), 15000).unref();
+setTimeout(() => server.close(() => process.exit(0)), 45000).unref();
 '@
 
   Set-Content -LiteralPath $serverPath -Value $serverSource -Encoding ASCII
+  $verificationCodexHome = Join-Path $captureDir 'codex-home'
+  New-Item -ItemType Directory -Force -Path $verificationCodexHome | Out-Null
   $port = Get-Random -Minimum 41000 -Maximum 49000
   $server = Start-Process -FilePath $node -ArgumentList @($serverPath, [string]$port, $logPath) -PassThru -WindowStyle Hidden
   $codexJob = $null
@@ -2039,45 +2849,131 @@ setTimeout(() => server.close(() => process.exit(0)), 15000).unref();
     }
 
     Write-Log 'verifying Fast Mode by capturing Codex wire request service_tier'
-    $baseUrlConfig = 'openai_base_url="http://127.0.0.1:' + $port + '/v1"'
-    $wireTier = $null
-    $codexJob = Start-Job -ScriptBlock {
-      param([string]$CodexPath, [string]$BaseUrlConfig)
-      & $CodexPath exec --json --skip-git-repo-check -c 'model_provider="openai"' -c $BaseUrlConfig -c 'service_tier="fast"' -c 'model_reasoning_effort="low"' 'wire capture only' 2>&1 | Out-Null
-    } -ArgumentList $codex, $baseUrlConfig
+    $providerId = 'codex-fast-wire'
+    $providerNameConfig = 'model_providers.' + $providerId + '.name="Codex Fast Wire Capture"'
+    $baseUrlConfig = 'model_providers.' + $providerId + '.base_url="http://127.0.0.1:' + $port + '/v1"'
+    $wireApiConfig = 'model_providers.' + $providerId + '.wire_api="responses"'
+    $providerEnvKeyConfig = 'model_providers.' + $providerId + '.env_key="OPENAI_API_KEY"'
+    $providerConfig = 'model_provider="' + $providerId + '"'
+    $startVerificationJob = {
+      param(
+        [ValidateSet('exec', 'app-server')]
+        [string]$Mode,
+        [string]$OutputPath
+      )
 
-    $requestDeadline = (Get-Date).AddSeconds(25)
-    while ((Get-Date) -lt $requestDeadline -and -not $wireTier) {
-      Start-Sleep -Milliseconds 200
-      if (-not (Test-Path -LiteralPath $logPath)) {
-        continue
-      }
-      foreach ($line in (Get-Content -LiteralPath $logPath)) {
-        try {
-          $entry = $line | ConvertFrom-Json -ErrorAction Stop
-        } catch {
-          continue
+      Start-Job -ScriptBlock {
+        param(
+          [string]$CodexPath,
+          [string]$ProviderConfig,
+          [string]$ProviderNameConfig,
+          [string]$BaseUrlConfig,
+          [string]$WireApiConfig,
+          [string]$ProviderEnvKeyConfig,
+          [string]$VerificationCodexHome,
+          [string]$Mode,
+          [string]$OutputPath
+        )
+        $env:CODEX_HOME = $VerificationCodexHome
+        $env:OPENAI_API_KEY = 'codex-fast-wire-verification'
+        if ($Mode -eq 'app-server') {
+          & $CodexPath debug app-server send-message-v2 'wire capture only' 2>&1 |
+            Out-File -LiteralPath $OutputPath -Encoding utf8
+        } else {
+          & $CodexPath exec --ignore-user-config --ephemeral --json --skip-git-repo-check -c $ProviderConfig -c $ProviderNameConfig -c $BaseUrlConfig -c $WireApiConfig -c $ProviderEnvKeyConfig -c 'service_tier="fast"' -c 'model_reasoning_effort="low"' -c 'model="gpt-5.6-sol"' -c 'features.enable_request_compression=false' 'wire capture only' 2>&1 |
+            Out-File -LiteralPath $OutputPath -Encoding utf8
         }
-        if ($entry.kind -ne 'frame' -or -not $entry.text) {
-          continue
+      } -ArgumentList $codex, $providerConfig, $providerNameConfig, $baseUrlConfig, $wireApiConfig, $providerEnvKeyConfig, $verificationCodexHome, $Mode, $OutputPath
+    }
+
+    $waitForWireTier = {
+      param(
+        [object]$Job,
+        [int]$TimeoutSeconds
+      )
+
+      $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+      while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+        if (Test-Path -LiteralPath $logPath) {
+          foreach ($line in (Get-Content -LiteralPath $logPath)) {
+            try {
+              $entry = $line | ConvertFrom-Json -ErrorAction Stop
+            } catch {
+              continue
+            }
+            if ($entry.kind -notin @('frame', 'http')) {
+              continue
+            }
+            if ([string]$entry.url -notmatch '^/v1/responses(?:\?|$)') {
+              continue
+            }
+            if (-not [string]::IsNullOrWhiteSpace([string]$entry.service_tier)) {
+              return [string]$entry.service_tier
+            }
+          }
         }
-        $match = [regex]::Match([string]$entry.text, '"service_tier"\s*:\s*"([^"]+)"')
-        if ($match.Success) {
-          $wireTier = $match.Groups[1].Value
+        if ($Job.State -in @('Completed', 'Failed', 'Stopped')) {
+          Start-Sleep -Milliseconds 300
           break
         }
       }
-      if ($codexJob.State -in @('Completed', 'Failed', 'Stopped') -and -not $wireTier) {
-        Start-Sleep -Milliseconds 300
-        if ((Get-Date) -lt $requestDeadline) {
-          continue
-        }
-        break
+      return $null
+    }
+
+    $verificationMode = 'exec'
+    $execOutputPath = Join-Path $captureDir 'codex-exec.log'
+    $codexJob = & $startVerificationJob $verificationMode $execOutputPath
+    $wireTier = & $waitForWireTier $codexJob 12
+
+    if (-not $wireTier) {
+      $execState = [string]$codexJob.State
+      if ($codexJob.State -eq 'Running') {
+        Stop-Job -Job $codexJob -ErrorAction SilentlyContinue
       }
+      Remove-Job -Job $codexJob -Force -ErrorAction SilentlyContinue
+
+      $verificationMode = 'app-server'
+      $appServerOutputPath = Join-Path $captureDir 'app-server.log'
+      $appServerConfigPath = Join-Path $verificationCodexHome 'config.toml'
+      $appServerConfig = @"
+model_provider = "$providerId"
+service_tier = "fast"
+model_reasoning_effort = "low"
+model = "gpt-5.6-sol"
+
+[features]
+enable_request_compression = false
+
+[model_providers.$providerId]
+name = "Codex Fast Wire Capture"
+base_url = "http://127.0.0.1:$port/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+"@
+      [System.IO.File]::WriteAllText($appServerConfigPath, $appServerConfig.TrimStart(), [System.Text.UTF8Encoding]::new($false))
+      Write-Log "warning: codex exec fast verification produced no wire request (state=$execState); trying app-server fallback"
+      $codexJob = & $startVerificationJob $verificationMode $appServerOutputPath
+      $wireTier = & $waitForWireTier $codexJob 25
     }
 
     if ($codexJob -and $codexJob.State -eq 'Running') {
-      Stop-Job -Job $codexJob -ErrorAction SilentlyContinue
+      Wait-Job -Job $codexJob -Timeout 5 | Out-Null
+    }
+    if ($verificationMode -eq 'app-server') {
+      $appServerOutput = if (Test-Path -LiteralPath $appServerOutputPath) {
+        Get-Content -Raw -LiteralPath $appServerOutputPath
+      } else {
+        ''
+      }
+      $threadTierMatches = [regex]::Matches($appServerOutput, '(?i)(?:\\?["'']?(?:serviceTier|service_tier)\\?["'']?)\s*[:=]\s*\\?["'']?(?<tier>[A-Za-z0-9_-]+)')
+      $threadTiers = @($threadTierMatches | ForEach-Object { $_.Groups['tier'].Value } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+      $threadTier = $threadTiers | Where-Object { $_ -eq 'priority' } | Select-Object -First 1
+      if (-not $threadTier) {
+        $observedTiers = if ($threadTiers.Count -gt 0) { $threadTiers -join ',' } else { '<none>' }
+        Fail "fast verification app-server fallback did not report thread/start serviceTier=priority (observed=$observedTiers)"
+      }
+      Write-Log 'fast verification fallback: thread/start serviceTier=priority (app-server)'
     }
     if (-not $wireTier) {
       Fail 'fast verification did not find service_tier in the captured request'
@@ -2164,6 +3060,9 @@ try {
   Copy-PackageLayout $sourcePackageRoot $workPackageRoot
   Remove-OldPackageArtifacts $workPackageRoot
 
+  $chromeRegistryParsing = Patch-ChromePluginWindowsRegistryParsing $workApp
+  Write-Log "Chrome localized registry parsing patch result: $chromeRegistryParsing"
+
   $patched = Invoke-PatchAppAsar $workApp $sourceApp $tempWork
   $asar = Join-Path $workApp 'resources\app.asar'
   $exe = Join-Path $workApp 'Codex.exe'
@@ -2207,3 +3106,6 @@ try {
     Remove-DirectoryRobust -Path $tempWork -RequiredRoot $workRoot -BestEffort
   }
 }
+
+# Native tools such as robocopy use nonzero success codes. Do not leak one after a successful script run.
+$global:LASTEXITCODE = 0

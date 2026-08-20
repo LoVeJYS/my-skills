@@ -8,15 +8,15 @@ This is the public version of the `codex-windows-fast-patch` skill. It helps Age
 
 Use this skill when Windows Codex Desktop updates cause issues like these:
 
-- Repair Fast Mode / Priority Mode when it is hidden, disabled, or does not actually take effect.
+- Fix missing Fast Mode, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna models, the blue-purple Power slider, and its disabled Ultra toggle under custom providers.
 - Repair the UI language resetting to English after restart.
 - Repair plugin entries, plugin install buttons, and plugin marketplace lists.
 - Repair the in-app browser, browser pane, Chrome, or browser_use when they are unavailable.
 - Repair Computer Use / computer control / Any App when it is unavailable.
-- Repair Computer Use errors such as `native pipe unavailable`, `missing-helper-path`, broken plugin cache, or broken helper paths.
+- Repair Computer Use when window enumeration succeeds but a later independent call fails because the persistent helper's app-approval callback loses the `node_repl` execution context; apply the patch only to the exact documented `@oai/sky` source hash.
+- Repair the exact supported Windows 10 CUA helper when screenshots fail because `SetIsBorderRequired` returns `0x80004002`, followed by a `FrameArrived` synchronous-wait deadlock after the optional interface is skipped.
 - Repair native phone remote control under a third-party API login state when the entry is hidden, the QR code keeps spinning, setup redirects to ChatGPT login, Allow fails, or the phone says the Codex version is expired.
 - Repair Goal entries, settings entries, or feature buttons that disappear or become disabled after updates.
-- Repair Desktop new-chat/thread-start failures caused by `dynamicTools` schema drift, including `missing field inputSchema` when the CLI smoke path still works.
 - Restore local conversations in the official sidebar after switching `model_provider` / API config when the local history data still exists; if a restored conversation is visible but cannot continue because its working directory is missing, recreate the missing empty directory from the rollout `cwd`.
 - Repair broken local plugin marketplace config or `codex plugin list` errors.
 - Optionally back up and restore local Codex config, skills, marketplaces, and related state.
@@ -40,14 +40,21 @@ Do not run it on macOS. A macOS version needs a separate workflow for the Codex 
 - `scripts/patch-dynamic-tools-schema.cjs`: Electron bundle patcher used by the dynamicTools MSIX script.
 - `scripts/patch-remote-control-windows-msix.ps1`: Phone remote-control MSIX / ASAR patch and marker verification reference implementation.
 - `scripts/patch-remote-control-asar.cjs`: Phone remote-control Electron bundle patcher used by the MSIX script.
-- `scripts/install-computer-use-local.ps1`: Windows Computer Use local compatibility reference implementation.
+- `scripts/build-remote-control-native-replacement.ps1`: Builds the patched native `app\resources\codex.exe` replacement under a caller-selected work root when the native app-server rejects API-key main auth. By default it detects the installed native version from a copied executable; bundled mappings cover `0.145.0-alpha.18`, exact-tag built, installed, and phone end-to-end validated with Desktop `26.715.2305.0`; `0.144.0-alpha.4`, equivalently validated with Desktop `26.707.3748.0`; and historical patch-apply-only validated `0.142.4`. Any other version requires an exact `-CodexSourceRef` / `-AppServerVersion` pair plus a validated `-PatchPathOverride`.
+- `scripts/install-computer-use-local.ps1`: Windows Computer Use and Chrome local-runtime repair reference implementation. It supports both the legacy `latest` plus plugin-local `node_modules` layout and the current versioned cache plus independent `%LOCALAPPDATA%` `cua_node` runtime, and synchronizes the outer Chrome native-host manifest, `extension-host-config.json`, and both schema-2 app-server state files.
+- `scripts/patch-computer-use-node-repl-context.ps1`: Exact-hash read-only classification, installation, full-hash verification, and rollback for the supported `@oai/sky 0.6.2` helper-transport cross-call app-approval context fix.
+- `scripts/patch-computer-use-helper-win10.ps1`: Read-only classification, exact-hash installation, and rollback for the supported `@oai/sky 0.4.20`, `0.5.2`, `0.6.6`, `0.6.11`, and `0.6.16` helper hashes; `26.707.12708.0`, `26.721.4979.0`, `26.803.10989.0`, `26.810.6296.0`, `26.810.7004.0`, and `26.814.5167.0` are their end-to-end validation baselines, not version gates. The latest `0.6.16` baseline includes a cold capture, ten repeated static captures, eight changing dynamic frames, accessibility, and post-warm-up resource-stability checks.
 - `scripts/sync-codex-provider-history.ps1`: Sync local conversation provider metadata so conversations hidden after a `model_provider` switch reappear in the official list; `-RepairMissingCwdDirs` can also repair restored conversations that cannot continue because the recorded `cwd` directory is missing. It does not modify `config.toml` or workspace/project roots by default.
 - `scripts/install-model-instructions-file.ps1`: Optional installer for the bundled `model_instructions_file` prompt asset.
 - `scripts/manage-codex-backups.ps1`: Backup manager for local Codex config, MCP, skills, and marketplaces.
 - `scripts/update-skill-from-github.ps1`: Best-effort self-update script that syncs the latest GitHub version before use.
 - `assets/system-prompt.md`: Bundled prompt asset used only when optional model instructions setup is requested.
 - `references/restriction-debug-cases.md`: On-demand cases for restriction gates, Chrome/browser_use, Computer Use, and Fast Mode.
+- `references/win10-computer-use-screenshot-backend.md`: Root cause, binary boundary, guarded workflow, and validation evidence for the Windows 10 screenshot backend.
 - `references/remote-control-debug-cases.md`: On-demand cases for phone remote-control pairing, isolated auth, native app-server networking, version-expired state, and post-pairing API endpoint diagnosis.
+- `references/remote-control-native-replacement.patch`: Reference Rust source patch for the phone remote-control native app-server replacement.
+- `references/remote-control-native-replacement-0.145.0-alpha.18.patch`: `rust-v0.145.0-alpha.18`-specific Rust patch built, installed, and phone end-to-end validated with Desktop `26.715.2305.0`.
+- `references/remote-control-native-replacement-0.142.4.patch`: Historical `rust-v0.142.4`-specific Rust patch with clean patch-apply validation only; it is not claimed as fully compiled or end-to-end validated.
 
 ## Install
 
@@ -75,7 +82,7 @@ After installing into Codex, restart Codex so it reloads skill metadata.
 
 After installation, ask an agent that supports Agent Skills to use the `codex-windows-fast-patch` workflow for the Codex Desktop issue on the current machine.
 
-This skill supports self-updating: before each substantive use, the agent first tries to check GitHub and sync the latest version, so you do not need to repeatedly return to GitHub and pull updates manually. This keeps the local skill as close as possible to the latest known workflow for newly discovered issues; if the network is unavailable, GitHub cannot be reached, or the download fails, that update step is skipped and the agent should continue with the currently installed local version.
+This skill supports self-updating: before each substantive use, the agent first tries to check GitHub and sync the latest version, so you do not need to repeatedly return to GitHub and pull updates manually. The sync covers the tracked top-level files (`SKILL.md`, both READMEs, `AGENTS.md`, `SECURITY.md`) plus the `agents`, `scripts`, `references`, and `assets` directories, so the commit recorded in `.skill-version` always matches the installed acceptance checklists. An installation containing `.skill-local-overlay` must also provide `.skill-update-source.json` with `owner`, `repo`, and `branch`, or the caller must pass an explicit source; otherwise self-update refuses to replace the overlay with the default upstream. This keeps the local skill as close as possible to the latest known workflow for newly discovered issues; if the network is unavailable, GitHub cannot be reached, or the download fails, that update step is skipped and the agent should continue with the currently installed local version.
 
 The scripts are reference implementations and operational templates, not a one-command fix that is guaranteed to work on every machine. A real run should first read `SKILL.md`, inspect the current Codex installation method, MSIX package path, ASAR contents, signing tools, plugin directories, and Computer Use file state, then decide whether to execute, adapt, or only borrow steps from the scripts.
 
@@ -86,6 +93,8 @@ Some repairs reinstall Codex Desktop. During reinstall, the current Codex Deskto
 The current Codex Desktop session can usually repair these without another agent:
 
 - Computer Use says the plugin is unavailable, shows `native pipe unavailable` or `missing-helper-path`, or breaks again after restart.
+- Computer Use `list_windows` succeeds but the next `get_window_state` or `activate_window` reports `node_repl exec context not found`; classify the exact source hash first and stop on unknown hashes.
+- Computer Use can enumerate windows but Windows 10 screenshots fail with `SetIsBorderRequired ... 0x80004002`; run the helper patcher only for its exact supported hash and stop on unknown hashes.
 - Chrome / browser_use helper paths, plugin cache, or native-host files are broken.
 - Plugin marketplace config is broken, or `codex plugin list` fails because of marketplace manifests.
 - A local marketplace is missing `.agents\plugins\marketplace.json`.
@@ -100,22 +109,40 @@ Use another agent, external PowerShell, the Codex extension inside VS Code/Antig
 - The UI language resets to English after restart.
 - Plugin entries, install buttons, Goal entries, or Computer Control `Any App` are greyed out or missing.
 - The in-app browser, browser pane, Chrome, or browser_use is hidden or disabled by Desktop-side gates.
+- The bundled runtime marketplace keeps dropping `sites`, or Desktop logs show `pluginNames` without `sites` plus `not_in_bundled_marketplace_plugin_names` for `sites@openai-bundled`.
 - Phone remote control is hidden, the QR keeps spinning, setup redirects to ChatGPT login, Allow fails, or the phone reports an expired Codex version.
 - Any repair that needs a full repatch, MSIX repack, Developer-signed package install, `app.asar` replacement, or `resources\codex.exe` replacement.
 
 Simple rule: if the repair stops, uninstalls, reinstalls, or relaunches Codex Desktop, run it from another agent or external PowerShell. If it only changes local config, plugin cache, marketplace files, backups, or verification, the current Codex Desktop session can usually handle it.
 
+## Using The VS Code Codex Extension As An External Executor
+
+On Windows, if a repair will stop, uninstall, reinstall, repackage the MSIX, replace `app.asar`, replace `resources\codex.exe`, or restart Codex Desktop, run it from the VS Code Codex extension, external PowerShell, or another agent environment that will not be interrupted by the Desktop restart.
+
+The target is always the Codex Desktop state directory: by default `$env:USERPROFILE\.codex`. Do not treat an isolated CLI wrapper as the Desktop execution environment. If a wrapper sets `CODEX_HOME` to `$env:USERPROFILE\.codex-cli` or another isolated directory, that is CLI state, not Desktop plugin, marketplace, MCP, remote-control, or login state.
+
+Before starting from the external executor, confirm there is no global `CODEX_HOME`. Do not copy or migrate `.codex` into `.codex-cli`, and do not commit or display `auth.json`, API keys, OAuth tokens, MCP credentials, browser profiles, or other local credentials. The recommended order is: back up Desktop state with `scripts\manage-codex-backups.ps1 -Action Backup`, run read-only checks and log triage, run the relevant script with `-DryRun`, and only then use the install path such as `repatch-codex-windows.ps1` or a targeted `*-windows-msix.ps1 -Install -Launch -InstallPrerequisites` after the dry run finds and validates the intended targets. A newly downloaded Store package may be Staged only for SYSTEM; the patcher selects current-user or SYSTEM-Staged registrations from `-AllUsers` and falls back to WindowsApps directories only when that query is unavailable. Verify the `selected Codex app` log before proceeding, and use `-AppPath` only to force a specific source.
+
+The phone remote-control install path downloads Windows SDK BuildTools from NuGet when `makeappx.exe` / `signtool.exe` are missing and keeps the cache under `-OutputRoot\.remote-control-temp`; a D-drive output root no longer falls back to `%TEMP%`. It does not force a local proxy by default; if the machine must use one, pass `-BuildToolsProxy "http://127.0.0.1:10808"` or set `CODEX_WINDOWS_SDK_BUILDTOOLS_PROXY`. Proxy URIs and credentials are not logged. If `curl download failed with exit code 7` appears, first check whether an explicitly configured local proxy is not listening.
+
+Keep the native replacement `-WorkRoot` on the requested large non-system drive and prefer a short root. During the validated `26.715.2305.0 / 0.145.0-alpha.18` build, a long D-drive root caused a Windows path-too-long failure while Cargo checked out a Git dependency; shortening the root to a shape such as `D:\CodexData\rc145` fixed the build. On PowerShell 5.1, the helper extracts SDK NuGet packages with checked `tar.exe` and supports the actual split `c\um\x64`, `c\ucrt\x64`, `c\Include\<version>`, and `c\bin\<version>\x64` layouts.
+
 Example request: `Use the codex-windows-fast-patch skill to inspect and repair Codex Desktop Fast Mode, language/locale, Chrome browser_use, plugin marketplace, and Computer Use availability on this Windows machine.`
 
-Phone remote-control example request: `Use the codex-windows-fast-patch skill to repair Windows Codex Desktop phone remote control while preserving my third-party API provider and current conversation history.`
+Phone remote-control example request: `Use the codex-windows-fast-patch skill to repair Windows Codex Desktop phone remote control while preserving my third-party API provider and current conversation history. If large build artifacts are needed, keep them on D:\ or another non-system drive.`
 
 Expected verification after a full run:
 
-- The patch log includes `fast-mode UI patch result`, `locale i18n patch result`, and `browser-use gate patch result`, each as `patched` or `already-patched`.
-- Fast Mode wire verification captures `service_tier=priority` in Codex Desktop's `/v1/responses` request.
+- The `selected Codex app` and `source package` log lines identify the intended highest version; a newer Store package Staged only for SYSTEM must not be silently hidden by an older user-installed package.
+- The patch log includes `fast-mode UI patch result`, `locale i18n patch result`, `browser-use gate patch result`, and `Node REPL trusted-paths patch result`, each as `patched` or `already-patched`.
+- Fast Mode local wire verification captures `service_tier=priority` from the `/v1/responses` HTTP body or WebSocket frame. If `codex exec` sends no request, the verifier falls back to app-server and also requires `thread/start serviceTier=priority`.
+- For Browser and Computer Use repair, `codex plugin list` shows `browser`, `chrome`, and `computer-use` from `openai-bundled` as `installed, enabled`; unrelated optional plugins such as `sites`, `latex`, `deep-research`, and `visualize` retain the user's prior state. Add `-VerifyAllBundledPluginsAvailable` to the main wrapper to append an availability assertion to its normal repair or DryRun flow. It verifies that stable descriptor names and versions match the current installed package and that the CLI JSON reports those same versions. The assertion performs no network download, does not call `plugin add`, and does not enable optional plugins, but the wrapper's other repair steps may still write state. For a fully read-only check, run `install-computer-use-local.ps1 -StrictVerifyOnly -VerifyAllBundledPluginsAvailable` directly.
+- For a `node_repl exec context not found` repair, `StrictVerifyOnly` reports the verified helper-transport patch hash. Then, after the call that starts the helper, at least two later independent calls must activate and capture the same stable window, and the image content must match that target. `list_windows`, a screenshot count, or a PNG file alone is not acceptance.
+- Desktop logs retain the current package's bundled descriptor names and do not use `not_in_bundled_marketplace_plugin_names` to remove a plugin the user had already installed. Descriptor presence does not mean the plugin is installed.
 - Desktop logs show `browser_use_availability_resolved` with `available=true` and `reason=local-patched` when browser use is part of the repair.
-- If Chrome control is required, `codex plugin list` shows `chrome@openai-bundled` as `installed, enabled`, the native messaging host manifest points to existing files, and a smoke test can read a controlled tab title such as `Example Domain`.
-- If phone remote control is repaired, Connections shows the phone setup path, QR appears, phone scan does not report an expired Codex environment, native logs show remote-control WebSocket ping/pong/ack, and phone-created turns reach Desktop.
+- If the Windows 10 screenshot helper is in scope, the patcher reports the validated patched SHA-256, and real Explorer first/repeated captures, dynamic Task Manager frames, accessibility text, window enumeration, and post-warm-up resource stability all pass.
+- If Chrome control is required, `codex plugin list` shows `chrome@openai-bundled` as `installed, enabled`; the native messaging host manifest path and registry value point to the current stable cache; `allowed_origins` exactly matches the top-level IDs in the cache's `scripts\extension-ids.json`; and `extension-host-config.json` contains a user-local `codex.exe` matching the current package plus `node.exe` / `node_repl.exe` from the same current runtime. Both `%LOCALAPPDATA%\OpenAI\Codex\chrome-native-hosts-v2.json` and `%USERPROFILE%\.codex\chrome-native-hosts-v2.json` must also contain the current version, official identity hashes, and existing cache/runtime paths. The stable marketplace and versioned-cache `browser-client.mjs` files must exactly match the installed package SHA-256. Legacy builds also require that hash in the current `app.asar`; `26.814`-style builds instead require the complete native-host path contract and both `browserClientPath` and `browserServicePath` in each v2 state entry, pointing into the same stable current-version cache. If that cache is junctioned outside `CODEX_HOME`, both the user-level and Desktop-generated `NODE_REPL_TRUSTED_CODE_PATHS` values must contain the resolved physical marketplace/cache roots, and the installed ASAR must contain `CODEX_NODE_REPL_TRUSTED_PATHS_V1`; writing the D-drive roots to `config.toml` once is insufficient because an unpatched Desktop overwrites them on restart. `setupBrowserRuntime()` must succeed, and `agent.browsers.get("chrome")` must return the real Chrome extension backend. A smoke test can then read a controlled tab title such as `Example Domain`. When Chrome is not running, launch it automatically without requesting additional user authorization, then validate `https://example.com/`, its `Example Domain` title, and its single matching `h1`.
+- If phone remote control is repaired, Connections shows the phone setup path, QR appears, phone scan does not report an expired Codex environment, WindowsApps PID/path-correlated native logs show `remote_control_websocket_proxy_connected` and `Connected` without repeated `os error 10060`, and phone-created turns reach Desktop. Some native versions handle Ping/Pong silently, so frame log text is not the sole success criterion.
 - If conversation visibility is repaired, `sync-codex-provider-history.ps1` shows App/legacy SQLite stores and readable rollouts aligned to the current `model_provider`, logs `config.toml sha256 unchanged`, official Desktop conversations reappear, and no empty project groups are introduced. If repairing visible-but-uncontinuable conversations, `missing rollout cwd dirs after` is zero or contains only reviewed skipped paths, and the affected conversation can send a new message after Desktop restart.
 
 ## Backup Management

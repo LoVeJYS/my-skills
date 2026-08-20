@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "90bde07a-5133-4fff-a121-f956b57555bf",
+  "path": "openspec-sync-specs",
+  "path_key": "openspec-sync-specs",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/Fission-AI/OpenSpec/tree/main/skills",
+    "subpath": "skills\\openspec-sync-specs",
+    "branch": "main"
+  }
+}

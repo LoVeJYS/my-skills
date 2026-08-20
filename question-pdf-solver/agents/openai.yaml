@@ -1,0 +1,4 @@
+interface:
+  display_name: "Question PDF Solver"
+  short_description: "题目截图翻译、编号解答与中文讲义PDF生成工具"
+  default_prompt: "Use $question-pdf-solver to turn question screenshots into a polished Chinese solution PDF."

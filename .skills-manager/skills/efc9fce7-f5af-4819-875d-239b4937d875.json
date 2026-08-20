@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "efc9fce7-f5af-4819-875d-239b4937d875",
+  "path": "openspec-bulk-archive-change",
+  "path_key": "openspec-bulk-archive-change",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/Fission-AI/OpenSpec/tree/main/skills",
+    "subpath": "skills\\openspec-bulk-archive-change",
+    "branch": "main"
+  }
+}

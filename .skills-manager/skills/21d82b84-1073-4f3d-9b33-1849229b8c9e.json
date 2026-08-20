@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "21d82b84-1073-4f3d-9b33-1849229b8c9e",
+  "path": "pick-ui-library",
+  "path_key": "pick-ui-library",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/emilkowalski/skills",
+    "subpath": "skills\\pick-ui-library",
+    "branch": null
+  }
+}

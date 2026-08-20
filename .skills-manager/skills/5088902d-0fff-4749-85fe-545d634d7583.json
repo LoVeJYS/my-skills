@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "5088902d-0fff-4749-85fe-545d634d7583",
+  "path": "openspec-propose",
+  "path_key": "openspec-propose",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/Fission-AI/OpenSpec/tree/main/skills",
+    "subpath": "skills\\openspec-propose",
+    "branch": "main"
+  }
+}

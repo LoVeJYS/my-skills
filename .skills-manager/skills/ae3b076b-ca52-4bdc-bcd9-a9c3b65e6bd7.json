@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ae3b076b-ca52-4bdc-bcd9-a9c3b65e6bd7",
+  "path": "openspec-onboard",
+  "path_key": "openspec-onboard",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/Fission-AI/OpenSpec/tree/main/skills",
+    "subpath": "skills\\openspec-onboard",
+    "branch": "main"
+  }
+}

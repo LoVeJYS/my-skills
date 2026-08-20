@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "8e8cc5fa-ac2c-45da-90a5-28d309d67dcb",
+  "path": "openspec-verify-change",
+  "path_key": "openspec-verify-change",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/Fission-AI/OpenSpec/tree/main/skills",
+    "subpath": "skills\\openspec-verify-change",
+    "branch": "main"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0995cbbc-b350-44b4-9f45-c2b2d0b7f76f",
+  "path": "animate-expo",
+  "path_key": "animate-expo",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/emilkowalski/skills",
+    "subpath": "skills\\animate-expo",
+    "branch": null
+  }
+}

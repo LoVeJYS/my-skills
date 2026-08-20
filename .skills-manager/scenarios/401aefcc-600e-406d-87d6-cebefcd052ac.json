@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "scenario_id": "401aefcc-600e-406d-87d6-cebefcd052ac",
+  "name": "Global",
+  "description": "Default startup scenario",
+  "icon": "briefcase",
+  "sort_order": 0
+}

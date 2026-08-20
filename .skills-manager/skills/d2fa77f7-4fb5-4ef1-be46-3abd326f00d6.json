@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d2fa77f7-4fb5-4ef1-be46-3abd326f00d6",
+  "path": "ask-sonner",
+  "path_key": "ask-sonner",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/emilkowalski/skills",
+    "subpath": "skills\\ask-sonner",
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "f4b074cb-1bb8-4772-95c0-67cf7d707e60",
+  "path": "writing-great-skills",
+  "path_key": "writing-great-skills",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "8e325e5d-c8ff-4ce6-a157-e159fc13c938",
+  "path": "openspec-explore",
+  "path_key": "openspec-explore",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/Fission-AI/OpenSpec/tree/main/skills",
+    "subpath": "skills\\openspec-explore",
+    "branch": "main"
+  }
+}

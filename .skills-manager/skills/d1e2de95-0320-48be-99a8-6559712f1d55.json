@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d1e2de95-0320-48be-99a8-6559712f1d55",
+  "path": "openspec-ff-change",
+  "path_key": "openspec-ff-change",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/Fission-AI/OpenSpec/tree/main/skills",
+    "subpath": "skills\\openspec-ff-change",
+    "branch": "main"
+  }
+}

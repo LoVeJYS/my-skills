@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d7c2fc6f-b84a-4dfa-9a05-98e1101f4a2c",
+  "path": "question-pdf-solver",
+  "path_key": "question-pdf-solver",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

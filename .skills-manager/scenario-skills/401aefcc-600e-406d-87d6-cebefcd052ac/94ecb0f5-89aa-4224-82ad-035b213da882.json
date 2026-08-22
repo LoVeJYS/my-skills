@@ -3,5 +3,9 @@
   "scenario_id": "401aefcc-600e-406d-87d6-cebefcd052ac",
   "skill_id": "94ecb0f5-89aa-4224-82ad-035b213da882",
   "sort_order": 2,
-  "tools": {}
+  "tools": {
+    "codex": true,
+    "kiro": true,
+    "pi": true
+  }
 }

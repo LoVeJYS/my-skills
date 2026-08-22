@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "097b3abc-fd65-4fc2-bc91-969096a7d3aa",
+  "path": "gsap-timeline",
+  "path_key": "gsap-timeline",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/greensock/gsap-skills.git",
+    "subpath": "skills\\gsap-timeline",
+    "branch": null
+  }
+}

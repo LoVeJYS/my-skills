@@ -113,6 +113,7 @@ Checks:
 - If the log says `reason=local-patched`, the Desktop availability gate is open; continue by checking the Chrome extension, native host manifest, and plugin cache.
 - If the log still says `statsig-disabled`, re-extract the ASAR and inspect targets for `featureName:\`browser_use_external\``, `featureName:\`browser_use\``, `browser-sidebar-availability-*.js`, `browser_use_availability_resolved`, and `.vite\build\main-*.js`.
 - In Codex 26.707.3748.0, inspect whether the sender object includes `findShortcuts` between `externalBrowserUseAllowed` and `computerUse`. The patcher must preserve that field instead of requiring those fields to be adjacent.
+- In Codex 26.818.2872.0, the sender and the Electron receiver both insert `browserExtensions` between `browserPane` and `externalBrowserUse`. The sender rewrite is value-only, so the new key survives into the patched text and the old adjacency-based patched-state literal stops matching: a second patch run on an already-patched install reports `browser-use-desktop-feature-sender-patch-target-not-found` even though the install is correct. Keep a bounded key slot on both sides of `browserPane` in the rewrite, the patched-state check, and the candidate-file detector. `scripts/test-desktop-feature-slot-patterns.ps1` pins the slot and no-slot shapes.
 - In Codex 26.707.8479.0, the Electron receiver can compute the Windows override with parameterized minified variables instead of the older fixed `i` platform variable. Match the `CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE` conditional by structure and preserve its Computer Use behavior while adding the browser-use overrides.
 - In Codex 26.707.8479.0, the plugin page can insert workspace/account-derived assignments between the `authMethod` hook and the auth-blocked variable. Use the subsequent `kind===\`manage\`` route assignment as a bounded structural anchor instead of requiring the blocked call to be adjacent to `authMethod`.
 - Check the native messaging host manifest at `%LOCALAPPDATA%\OpenAI\extension\com.openai.codexextension.json` and the registry key `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.openai.codexextension`.
@@ -172,6 +173,7 @@ Checks:
 - Inspect running `extension-host` processes whose paths are under `%USERPROFILE%\.codex\plugins\cache\openai-bundled`.
 - Inspect `%USERPROFILE%\.codex\chrome-native-hosts.json`; remove stale entries whose `extensionHostPath` or `browserClientPath` points to a missing file.
 - If the browser files and versioned cache exist but `codex plugin list` still reports `browser@openai-bundled` as `not installed`, do not treat another direct TOML write as a durable install. Desktop reconciliation can prune that enabled entry again because the CLI install record was never created.
+- If `codex plugin marketplace add` fails with `invalid marketplace file ...marketplace.json: expected value at line 1 column 1`, read the first three bytes of that file before suspecting its contents. A UTF-8 BOM makes the Rust JSON parser reject the whole document, and comparing the file with its source is misleading because PowerShell reads a BOM-prefixed file back without complaint.
 
 Action:
 
@@ -179,6 +181,7 @@ Action:
 - Stop only those bundled `extension-host` processes when they are locking the bundled marketplace mirror.
 - Rerun `scripts\install-computer-use-local.ps1`.
 - Let the repair register `browser@openai-bundled` through `codex plugin add ... --json` after the local marketplace is complete. On Windows, invoke a user-accessible CLI shim such as the npm `codex.cmd`; do not execute the protected `WindowsApps\...\resources\codex.exe` path directly.
+- Write every marketplace JSON as BOM-less UTF-8. `Set-Content -Encoding UTF8` emits a BOM on PowerShell 5.1, so a rewrite step can corrupt the registered copy while the source file stays valid; use `[System.IO.File]::WriteAllText` with `UTF8Encoding($false)`.
 - If the copy fails because a file under `.tmp\bundled-marketplaces\openai-bundled` disappears mid-read, treat it as Desktop reconciliation racing the repair. Stable plugin caches must be sourced from the installed package; only the locally modified Computer Use runtime is overlaid afterward.
 - Restart Codex Desktop.
 - Confirm the latest Desktop log ends with `computer-use native pipe startup ready`.

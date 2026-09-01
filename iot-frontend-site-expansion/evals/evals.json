@@ -1,0 +1,79 @@
+{
+  "skill_name": "iot-frontend-site-expansion",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "给 iot-platform-web 新增南非站，cloudId=11，env=za，中台网关地址=https://middle.example.za。SSO client ID 和回调暂时没有，其他环境配置参考 hz。请完成模板管理全部站点适配、验证并提交。",
+      "expected_output": "识别三个必填输入，保留两个 SSO 值为空；完成环境、构建、服务映射、模板同步与四类自描述适配；验证 build:za；只提交本次文件并提醒补 SSO。",
+      "assertions": [
+        "缺失 SSO 保持为空且不猜测",
+        "覆盖环境、构建、8 组服务和直连映射",
+        "覆盖模板同步和四类自描述且字段命名正确",
+        "验证完整并保护脏工作区",
+        "提交后提醒补 SSO"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "新增巴西区域站：env=br，cloudId=12，中台根地址 https://middle.example.br，VITE_SSO_CLIENTID=ai-example-br，VITE_SSO_GETTOKEN=https://iot-br.example.br/#/getLoginToken。模板管理也要全部支持，做完检查并提交。",
+      "expected_output": "直接写入完整 SSO 配置，且含 # 的 GETTOKEN 在 dotenv 中用双引号保护；新增 br 构建和全部模板管理适配；同步人字段保持 UserNo；验证后创建明确且不夹带无关改动的提交。",
+      "assertions": [
+        "直接使用完整 SSO 输入",
+        "VITE_SSO_GETTOKEN 含 # 时写成双引号 dotenv 值且不截断",
+        "覆盖环境、服务、模板管理和词条同步",
+        "保持普通同步分支和 UserNo 约定",
+        "验证和提交安全完整"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "再加一个印度站，env=india，cloudId=9，中台地址还是 https://middle.isolarcloud.in，帮我自动改模板管理并提交。",
+      "expected_output": "检测到 env/cloudId 已存在并停止修改，不创建重复配置或提交，要求用户确认是更新现有站点还是提供新的 env/cloudId。",
+      "assertions": [
+        "识别 env 和 cloudId 冲突",
+        "停止修改和提交",
+        "请求用户确认下一步"
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "补充 mea 的 SSO 配置，只设置 VITE_SSO_GETTOKEN=https://iot-mea.example.com/#/getLoginToken，现有 VITE_SSO_CLIENTID 和其他配置不要动。检查构建后提交。",
+      "expected_output": "识别为已有 env 的 SSO 后补模式，不索取 cloudId 或中台地址，也不把 mea 已存在当作冲突；只修改 GETTOKEN 并用双引号保护 #，保留 CLIENTID 与其他配置；验证 build:mea 后创建独立 chore 提交。",
+      "assertions": [
+        "进入 SSO 后补模式且不要求新增站点的三个必填项",
+        "只修改用户提供的 GETTOKEN 并保持 CLIENTID 与其他配置不变",
+        "GETTOKEN 含 # 时写成双引号 dotenv 值",
+        "运行 build:mea",
+        "使用 chore: configure mea SSO 提交且不夹带无关改动"
+      ],
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "给 iot-platform-web 新增墨西哥站，env=mx，cloudId=13，中台地址=https://middle.example.mx，SSO 先留空，完成模板管理适配并检查。",
+      "expected_output": "完成新增站点修改和验证，但因为用户未明确要求提交，不执行 git add 或 git commit；最终说明未提交并询问是否需要创建本地提交。",
+      "assertions": [
+        "完成新增站点改造与验证",
+        "不把 Skill 自动触发视为提交授权",
+        "不暂存也不提交",
+        "准确报告未提交状态"
+      ],
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "工作区的 package.json 已有我未提交的修改，暂存区也有 config/env/.env.test。现在新增 env=ca、cloudId=14、中台地址=https://middle.example.ca，完成模板管理并提交。",
+      "expected_output": "预检识别目标文件 package.json 在任务前已修改且暂存区非空，在写入任何文件前停止并询问用户处理方式；不覆盖、不暂存、不提交。",
+      "assertions": [
+        "写入前检查目标文件和暂存区",
+        "识别目标文件既有改动和已有 staged 内容",
+        "停止修改并请求用户先处理",
+        "不夹带、覆盖或提交用户改动"
+      ],
+      "files": []
+    }
+  ]
+}

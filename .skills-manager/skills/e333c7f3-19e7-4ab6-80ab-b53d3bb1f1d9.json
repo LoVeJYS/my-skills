@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "e333c7f3-19e7-4ab6-80ab-b53d3bb1f1d9",
+  "path": "iot-frontend-site-expansion",
+  "path_key": "iot-frontend-site-expansion",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

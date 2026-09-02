@@ -1,10 +1,14 @@
 ---
 name: iot-frontend-site-expansion
-description: 为 iot-platform-web 新增或扩展区域站点 env，完整适配“模板管理”菜单、站点服务映射、独立环境配置、构建入口、同步状态与词条同步路由，也可为已有 env 安全补充 SSO 配置；全面验证后仅在用户明确授权时提交本次改动。当用户要求在 iot-platform-web 执行新增/扩展区域站点、模板管理站点适配，或补充已有 env 的 SSO 配置时使用；不要因纯概念咨询或仅提到 cloudId、env 自动执行改造。
+description: 为 iot-platform-web 新增或扩展区域站点 env，完整适配“模板管理”菜单、站点服务映射、独立环境配置、构建入口、同步状态与词条同步路由，也可为已有 env 安全补充 SSO 配置；全面验证后仅在用户明确授权时提交本次改动。仅在用户明确指名调用本 Skill（iot-frontend-site-expansion）时才使用；即使用户提到新增站点、env、cloudId、中台网关、模板同步等，只要没有点名调用本 Skill，也不要自动触发。
 compatibility: 需要可读写当前 Git 工作区，并可运行 Node.js、npm、Vite、ESLint 和 Git 命令。
 ---
 
 # IoT 前端站点扩展
+
+## 调用约定
+
+本 Skill 仅在用户明确指名调用时执行（例如“使用 iot-frontend-site-expansion”“用这个 Skill 新增站点”）。若用户只是咨询、讨论，或提到新增站点、env、cloudId、中台网关、模板同步等关键词但没有点名调用本 Skill，不要自动触发或执行任何改造，可正常回答问题，并在合适时告知用户可显式调用本 Skill。
 
 ## 目标
 

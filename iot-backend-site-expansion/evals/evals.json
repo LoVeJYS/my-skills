@@ -1,0 +1,93 @@
+{
+  "skill_name": "iot-backend-site-expansion",
+  "evals": [
+    {
+      "id": 1,
+      "name": "explicit-missing-scope-and-addresses",
+      "prompt": "使用 iot-backend-site-expansion 新增 LATAM 站点，env=latam，siteId=11，中文名=拉美站，参考 hk。地址都还没准备好，我也还没确定要全仓还是只改部分服务。请开始处理，但本轮只输出你此刻应该给用户的响应，不要真的修改文件。",
+      "expected_output": "Skill 应命中显式调用门禁；先询问全仓或指定 Java module/service，地址不齐时说明默认只调查并生成通用模板，不开始实现；明确 ECO 禁止且不猜测地址。",
+      "files": ["evals/fixtures/java-multimodule-repo.md"],
+      "expectations": [
+        "明确要求用户在全仓扫描和指定 Java module/service 之间选择，并说明选择指定范围时需给出模块或目录。",
+        "说明地址不齐时默认进入调查与模板模式，生成 Java/Rust 通用回填模板并暂停业务实现。",
+        "明确 ECO 配置禁止新增、复制、修改或删除。",
+        "遵守本轮只输出响应且不修改文件，不猜测或复制参考站点地址。"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "explicit-eco-conflict-rust-scope",
+      "prompt": "调用 iot-backend-site-expansion 给这个 Cargo workspace 新增 africa 应用站点。不要扫描全仓，只改 crates/device-api 和 crates/sync-worker；请同时复制 hk 的 deploy/eco 和 legacy-eco-adapter，地址暂时用占位符。本轮只输出你此刻应该给用户的响应，不要真的修改文件。",
+      "expected_output": "Skill 应因 ECO 不可变禁令拒绝 ECO 动作；准确保留 Rust package/crate 范围，在用户移除冲突要求前不实施业务改造；仍说明非 ECO 通用模板始终需要生成或更新，但本轮遵守只输出响应而不落盘。",
+      "files": ["evals/fixtures/rust-cargo-workspace-repo.md"],
+      "expectations": [
+        "明确拒绝复制或修改 deploy/eco、legacy-eco-adapter 或任何 ECO 内容，并将其描述为不可绕过的 Skill 约束。",
+        "在用户移除 ECO 要求前停止 ECO 动作和业务实施；仍说明非 ECO 通用模板始终需要生成或更新，但本轮不落盘。",
+        "准确保留允许范围仅为 crates/device-api 和 crates/sync-worker，不擅自加入 migration crate、全 workspace 或 excluded crate。",
+        "不复制 HK 真实地址；仅记录用户对安全占位的意图，等待冲突解除。"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "explicit-placeholder-authorized-whole-repo",
+      "prompt": "使用 iot-backend-site-expansion 给这个 Java 仓库新增 sea，siteId=21，中文名东南亚站。扫描整个仓库，结构参考 singapore，Redis 空密码参考 india。真实地址尚未提供，我明确授权使用每个服务独立的 .invalid 安全占位继续，但必须给我后续回填模板。允许新增迁移 SQL，不要执行。本轮只输出实施前方案和检查清单，不要真的修改文件。",
+      "expected_output": "Skill 应接受 Java 全仓扫描与显式安全占位授权；承诺始终生成通用模板；区分主/次参考站点；为每个逻辑端点独立占位；禁止 ECO；允许创建但不执行 SQL；先动态调查再列计划。",
+      "files": ["evals/fixtures/java-multimodule-repo.md"],
+      "expectations": [
+        "接受 whole-repository 范围，但说明全仓扫描不等于机械修改全部 Java module。",
+        "区分 singapore 主参考与 india Redis 空密码次参考，并在参考应用 profile 无法解析时阻止猜测。",
+        "为 discovery/config、数据库读写、消息 cluster、MQTT cluster 或 HTTP 服务设计彼此独立的 .invalid 占位，不使用单一通用主机。",
+        "承诺无论地址是否齐全都生成 Java/Rust 通用回填模板，并覆盖外部配置源与常见基础设施。",
+        "明确 ECO 零改动；迁移 SQL 只允许创建和校验、不得执行，并说明发布顺序。",
+        "遵守本轮只输出方案和清单，不修改文件、运行 SQL、提交或推送。"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "not-explicit-maintenance-request",
+      "prompt": "我们准备给已有 india 站替换 Redis 和 Kafka 地址，顺便看看要不要改 DTS。先告诉我会改哪些地方，不要动文件。",
+      "expected_output": "由于用户没有明确点名 iot-backend-site-expansion，且目标是维护已有站点，Skill 不应被执行；响应应说明本 Skill 未触发，可按普通分析回答或提示如何显式调用，但不能进入新增站点流程。",
+      "files": ["evals/fixtures/java-multimodule-repo.md"],
+      "expectations": [
+        "明确说明 iot-backend-site-expansion 未触发，原因同时包含未显式点名和目标为已有站点维护。",
+        "不进入新增站点流程，不生成新增站点模板、迁移或站点 profile。",
+        "可按普通维护任务分析 Redis、Kafka 与 DTS 的实际配置归属和最小影响面。",
+        "遵守用户要求不修改文件。"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "explicit-multi-kafka-redis-topology-and-reuse",
+      "prompt": "使用 iot-backend-site-expansion 新增 oce，siteId=31，中文名大洋洲站，主参考 profile 为 hk，扫描整个 Java 仓库。真实地址未提供，我明确授权使用安全 .invalid 占位。请根据夹具中的两个 Kafka cluster、三种 Redis 模式和地址复用关系，展示要生成的结构化补填模板与实施前检查：不能漏掉任何 broker/node，Redis database 不能当作新主机；discovery 和 config 已确认属于 reuseGroup=control-plane，但 HTTP 端点即使参考地址相同也没有确认复用。允许生成迁移 SQL但不要执行。本轮只输出模板设计和检查结果，不要修改文件、执行 SQL 或提交 Git。",
+      "expected_output": "Skill 应将多个 Kafka cluster 与各自 broker、多个 Redis instance 与不同模式节点、logical database 引用和显式 reuseGroup 分层表达；使用节点级安全占位，拒绝自动推断同址复用，并维持 ECO、SQL、模板和 Git 安全边界。",
+      "files": ["evals/fixtures/multi-address-topology-repo.md"],
+      "expectations": [
+        "分别表示 order-cluster 的 3 个 broker 和 telemetry-cluster 的 2 个 broker，不漏项、不跨 cluster 合并，并使用 broker 级独立 .invalid 占位。",
+        "分别表示 business-cache standalone、device-cache cluster 和 distributed-lock sentinel 三个 Redis instance，并保留 device-cache 的 3 个 cluster data node。",
+        "将 distributed-lock 的 3 个 sentinel node 与 1 个 data primary、1 个 data replica 分开记录，并保留 masterName=lock-master。",
+        "将 default-cache database 0 和 dts-cache database 13 表示为对 business-cache 的 logical database 引用，不为 database 创建独立 host、port、凭据或 .invalid 占位。",
+        "让 discovery 与 config 通过 control-plane 复用同一规范目标地址集合但保留两条逻辑记录；不因参考地址相同而把未声明 reuseGroup 的 HTTP 端点自动归组。",
+        "校验 cluster/instance/node 标识唯一、所有 parent/ref 可解析，并比较每个 cluster/instance 的节点数量；存在缺项时阻止实施而不是猜测。",
+        "始终要求生成或更新通用模板，明确 ECO 零改动，迁移 SQL 只生成和校验而不执行。",
+        "遵守本轮只输出模板设计和检查结果，不修改文件、不执行 SQL、不暂存提交或推送，也不输出明文秘密。"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "explicit-rust-cargo-workspace-discovery",
+      "prompt": "使用 iot-backend-site-expansion 给这个 Rust Cargo workspace 新增 mea 应用站点，主参考应用站点是 hk，扫描整个仓库。这个项目没有 siteId/cloudId、中文名、UUID 或 tenant key，只有字符串站点 slug；真实数据库和消息地址尚未准备好，所以本轮只做调查和模板，不使用占位符。请输出实施前方案和检查清单，不修改文件、不运行 migration、不提交 Git。",
+      "expected_output": "Skill 应按 Rust/Cargo 语义盘点 workspace、应用配置和源码契约；把条件身份字段标记 not-used；区分 Cargo build profile hk 与应用 HK 站点；识别自定义 target-dir 和 sqlx migration；选择目标 package 的仓库验证命令，同时保持模板、ECO、迁移和 Git 边界。",
+      "files": ["evals/fixtures/rust-cargo-workspace-repo.md"],
+      "expectations": [
+        "接受 whole-repository 调查但不机械修改全部 crate，并独立盘点根/虚拟 Cargo.toml、members、exclude、default-members 和 package manifests，即使根清单没有 hk token。",
+        "接受字符串站点 slug 为实际身份契约，将 siteId/cloudId、中文名、UUID 和 tenant key 标记为 not-used，而不是要求用户补填。",
+        "明确区分 config/hk.toml 与应用 Site::Hk 和 Cargo [profile.hk]；不得把 Cargo build profile 当应用站点，也不得计划创建 [profile.mea]。",
+        "追踪 Rust enum/match、serde 名称、reqwest client registry、sync-worker fan-out、build.rs 和配置加载路径的对称性。",
+        "识别默认 target/ 与 .cargo/config.toml 中 artifacts/cargo-target 为构建产物并排除，同时不进入 deploy/eco 或 excluded legacy-eco-adapter。",
+        "识别 sqlx migration 目录和契约；只允许按需要创建和校验迁移，不运行 sqlx migrate run 或连接数据库。",
+        "优先使用 cargo metadata 以及针对 device-api/sync-worker 的 cargo check/test，不无依据使用全 workspace 或 --all-features。",
+        "地址不齐时只调查并始终生成 Java/Rust 通用模板，不使用占位、不修改文件、不执行迁移、不暂存提交或推送。"
+      ]
+    }
+  ]
+}

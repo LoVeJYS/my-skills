@@ -3,77 +3,151 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "给 iot-platform-web 新增南非站，cloudId=11，env=za，中台网关地址=https://middle.example.za。SSO client ID 和回调暂时没有，其他环境配置参考 hz。请完成模板管理全部站点适配、验证并提交。",
-      "expected_output": "识别三个必填输入，保留两个 SSO 值为空；完成环境、构建、服务映射、模板同步与四类自描述适配；验证 build:za；只提交本次文件并提醒补 SSO。",
-      "assertions": [
-        "缺失 SSO 保持为空且不猜测",
-        "覆盖环境、构建、8 组服务和直连映射",
-        "覆盖模板同步和四类自描述且字段命名正确",
-        "验证完整并保护脏工作区",
-        "提交后提醒补 SSO"
+      "prompt": "请使用 iot-frontend-site-expansion 给 iot-platform-web 新增南非站，cloudId=11，env=za，中台网关地址=https://middle.example.za，正式展示名=南非站。SSO client ID 和回调暂时没有，VITE_SSO_URL 和 Gateway 配置明确授权参考 hz。请完成模板管理全部站点适配、验证并创建本地提交，不要 push。",
+      "expected_output": "完成 za 环境、构建、生产服务、直连映射、模板同步与四类自描述适配；SSO 两项保持为空；验证通过后只提交 allowlist 文件并说明未 push及 SSO 功能限制。",
+      "files": [],
+      "expectations": [
+        "config/env/.env.za 中 VITE_CLOUD_ID 精确等于 11",
+        "VITE_SSO_CLIENTID 和 VITE_SSO_GETTOKEN 均为空且没有猜测值",
+        "package、Vite config 和 checkInstallBuild 均存在 za 对应入口",
+        "fixture 中所有支持生产站点的服务组都包含 cloudId 11，dev/test-only 组不包含 11",
+        "protocolSyncSiteCloudIdMap 包含 za 到 11 的映射",
+        "模板同步包含 za option、syncZa、syncZaTime、syncZaUserNo 及对应编辑删除条件",
+        "四类自描述页面分别包含 za option、syncZa 条件和汇总状态",
+        "za 没有进入 EU-only 文件下载条件",
+        "验证记录包含 verify-site、定向 ESLint、typecheck 和 build:za 的退出结果",
+        "最终 commit 文件集合只包含本次 allowlist，commit 后没有 push",
+        "最终回复只提示两个实际缺失的 SSO 键并说明登录暂不可用"
       ],
-      "files": []
+      "assertions": [
+        "config/env/.env.za 中 VITE_CLOUD_ID 精确等于 11",
+        "VITE_SSO_CLIENTID 和 VITE_SSO_GETTOKEN 均为空且没有猜测值",
+        "package、Vite config 和 checkInstallBuild 均存在 za 对应入口",
+        "fixture 中所有支持生产站点的服务组都包含 cloudId 11，dev/test-only 组不包含 11",
+        "protocolSyncSiteCloudIdMap 包含 za 到 11 的映射",
+        "模板同步包含 za option、syncZa、syncZaTime、syncZaUserNo 及对应编辑删除条件",
+        "四类自描述页面分别包含 za option、syncZa 条件和汇总状态",
+        "za 没有进入 EU-only 文件下载条件",
+        "验证记录包含 verify-site、定向 ESLint、typecheck 和 build:za 的退出结果",
+        "最终 commit 文件集合只包含本次 allowlist，commit 后没有 push",
+        "最终回复只提示两个实际缺失的 SSO 键并说明登录暂不可用"
+      ]
     },
     {
       "id": 2,
-      "prompt": "新增巴西区域站：env=br，cloudId=12，中台根地址 https://middle.example.br，VITE_SSO_CLIENTID=ai-example-br，VITE_SSO_GETTOKEN=https://iot-br.example.br/#/getLoginToken。模板管理也要全部支持，做完检查并提交。",
-      "expected_output": "直接写入完整 SSO 配置，且含 # 的 GETTOKEN 在 dotenv 中用双引号保护；新增 br 构建和全部模板管理适配；同步人字段保持 UserNo；验证后创建明确且不夹带无关改动的提交。",
-      "assertions": [
-        "直接使用完整 SSO 输入",
-        "VITE_SSO_GETTOKEN 含 # 时写成双引号 dotenv 值且不截断",
-        "覆盖环境、服务、模板管理和词条同步",
-        "保持普通同步分支和 UserNo 约定",
-        "验证和提交安全完整"
+      "prompt": "请使用 iot-frontend-site-expansion 新增巴西区域站：env=br，cloudId=12，正式展示名=巴西站，中台根地址=https://middle.example.br，VITE_SSO_CLIENTID=ai-example-br，VITE_SSO_GETTOKEN=https://iot-br.example.br/#/getLoginToken，VITE_SSO_URL 和 Gateway 配置明确授权参考 hz。模板管理全部支持，验证后创建本地提交，不要 push。",
+      "expected_output": "写入完整 SSO 配置并保护 GETTOKEN 中的 #；完成 br 构建、服务与模板管理适配；验证后创建不夹带无关改动的本地提交。",
+      "files": [],
+      "expectations": [
+        "VITE_SSO_CLIENTID 精确等于 ai-example-br",
+        "VITE_SSO_GETTOKEN 使用双引号且 Vite 解析值保留完整 #/getLoginToken",
+        "package、Vite config 和 checkInstallBuild 均存在 br 对应入口",
+        "所有动态发现的生产服务组包含 cloudId 12，dev/test-only 组不包含 12",
+        "protocolSyncSiteCloudIdMap 包含 br 到 12 的映射",
+        "模板同步和四类自描述页面完整覆盖 br，且同步人字段为 syncBrUserNo",
+        "br 走普通 JSON 同步分支，没有复制 EU 文件分支",
+        "验证记录包含 verify-site、定向 ESLint、typecheck 和 build:br 的退出结果",
+        "commit message 为 feat: add br template management support",
+        "最终 commit 未包含 fixture 原有改动且没有 push"
       ],
-      "files": []
+      "assertions": [
+        "VITE_SSO_CLIENTID 精确等于 ai-example-br",
+        "VITE_SSO_GETTOKEN 使用双引号且 Vite 解析值保留完整 #/getLoginToken",
+        "package、Vite config 和 checkInstallBuild 均存在 br 对应入口",
+        "所有动态发现的生产服务组包含 cloudId 12，dev/test-only 组不包含 12",
+        "protocolSyncSiteCloudIdMap 包含 br 到 12 的映射",
+        "模板同步和四类自描述页面完整覆盖 br，且同步人字段为 syncBrUserNo",
+        "br 走普通 JSON 同步分支，没有复制 EU 文件分支",
+        "验证记录包含 verify-site、定向 ESLint、typecheck 和 build:br 的退出结果",
+        "commit message 为 feat: add br template management support",
+        "最终 commit 未包含 fixture 原有改动且没有 push"
+      ]
     },
     {
       "id": 3,
-      "prompt": "再加一个印度站，env=india，cloudId=9，中台地址还是 https://middle.isolarcloud.in，帮我自动改模板管理并提交。",
-      "expected_output": "检测到 env/cloudId 已存在并停止修改，不创建重复配置或提交，要求用户确认是更新现有站点还是提供新的 env/cloudId。",
-      "assertions": [
-        "识别 env 和 cloudId 冲突",
-        "停止修改和提交",
-        "请求用户确认下一步"
+      "prompt": "请使用 iot-frontend-site-expansion 再加一个印度站，env=india，cloudId=9，正式展示名=印度站，中台地址=https://middle.isolarcloud.in，帮我自动改模板管理并创建本地提交。",
+      "expected_output": "检测到 env/cloudId 已存在，在任何写入前停止，不创建配置或提交，并询问是更新现有站点还是提供新值。",
+      "files": [],
+      "expectations": [
+        "预检识别 config/env/.env.india 或 build:india 已存在",
+        "预检识别 cloudId 9 已被占用",
+        "执行前后 HEAD 完全一致",
+        "执行前后工作区文件内容完全一致",
+        "最终回复要求用户确认更新已有站点或提供新的 env/cloudId"
       ],
-      "files": []
+      "assertions": [
+        "预检识别 config/env/.env.india 或 build:india 已存在",
+        "预检识别 cloudId 9 已被占用",
+        "执行前后 HEAD 完全一致",
+        "执行前后工作区文件内容完全一致",
+        "最终回复要求用户确认更新已有站点或提供新的 env/cloudId"
+      ]
     },
     {
       "id": 4,
-      "prompt": "补充 mea 的 SSO 配置，只设置 VITE_SSO_GETTOKEN=https://iot-mea.example.com/#/getLoginToken，现有 VITE_SSO_CLIENTID 和其他配置不要动。检查构建后提交。",
-      "expected_output": "识别为已有 env 的 SSO 后补模式，不索取 cloudId 或中台地址，也不把 mea 已存在当作冲突；只修改 GETTOKEN 并用双引号保护 #，保留 CLIENTID 与其他配置；验证 build:mea 后创建独立 chore 提交。",
-      "assertions": [
-        "进入 SSO 后补模式且不要求新增站点的三个必填项",
-        "只修改用户提供的 GETTOKEN 并保持 CLIENTID 与其他配置不变",
-        "GETTOKEN 含 # 时写成双引号 dotenv 值",
-        "运行 build:mea",
-        "使用 chore: configure mea SSO 提交且不夹带无关改动"
+      "prompt": "请使用 iot-frontend-site-expansion 补充 mea 的 SSO 配置，只设置 VITE_SSO_GETTOKEN=https://iot-mea.example.com/#/getLoginToken，现有 VITE_SSO_CLIENTID 和其他配置不要动。检查 build:mea 后创建独立本地提交，不要 push。",
+      "expected_output": "进入已有 env 的 SSO 后补模式，只修改 GETTOKEN 并用双引号保护 #；保留 CLIENTID 和其他配置；验证后创建 chore 提交。",
+      "files": [],
+      "expectations": [
+        "没有要求 cloudId、中台地址或展示名",
+        "只有 VITE_SSO_GETTOKEN 一行发生内容变化",
+        "VITE_SSO_CLIENTID 与执行前逐字一致",
+        "GETTOKEN 使用双引号且 Vite 解析值保留完整 #/getLoginToken",
+        "验证记录包含 verify-site --mode=sso 和 build:mea 的退出结果",
+        "commit message 为 chore: configure mea SSO",
+        "commit 只包含 config/env/.env.mea 且没有 push"
       ],
-      "files": []
+      "assertions": [
+        "没有要求 cloudId、中台地址或展示名",
+        "只有 VITE_SSO_GETTOKEN 一行发生内容变化",
+        "VITE_SSO_CLIENTID 与执行前逐字一致",
+        "GETTOKEN 使用双引号且 Vite 解析值保留完整 #/getLoginToken",
+        "验证记录包含 verify-site --mode=sso 和 build:mea 的退出结果",
+        "commit message 为 chore: configure mea SSO",
+        "commit 只包含 config/env/.env.mea 且没有 push"
+      ]
     },
     {
       "id": 5,
-      "prompt": "给 iot-platform-web 新增墨西哥站，env=mx，cloudId=13，中台地址=https://middle.example.mx，SSO 先留空，完成模板管理适配并检查。",
-      "expected_output": "完成新增站点修改和验证，但因为用户未明确要求提交，不执行 git add 或 git commit；最终说明未提交并询问是否需要创建本地提交。",
-      "assertions": [
-        "完成新增站点改造与验证",
-        "不把 Skill 自动触发视为提交授权",
-        "不暂存也不提交",
-        "准确报告未提交状态"
+      "prompt": "请使用 iot-frontend-site-expansion 给 iot-platform-web 新增墨西哥站，env=mx，cloudId=13，正式展示名=墨西哥站，中台地址=https://middle.example.mx，SSO 先留空，VITE_SSO_URL 和 Gateway 配置明确授权参考 hz。完成模板管理适配并检查，但不要暂存或提交。",
+      "expected_output": "完成新增站点和验证；因为用户明确禁止提交，不执行 git add 或 git commit，并准确报告工作区状态。",
+      "files": [],
+      "expectations": [
+        "完成 mx 的环境、构建、服务、直连映射和模板管理适配",
+        "SSO client ID 和 GETTOKEN 保持为空",
+        "执行前后 Git index 内容完全一致",
+        "执行前后 HEAD 完全一致",
+        "最终回复明确说明未暂存、未提交且原因是用户禁止提交"
       ],
-      "files": []
+      "assertions": [
+        "完成 mx 的环境、构建、服务、直连映射和模板管理适配",
+        "SSO client ID 和 GETTOKEN 保持为空",
+        "执行前后 Git index 内容完全一致",
+        "执行前后 HEAD 完全一致",
+        "最终回复明确说明未暂存、未提交且原因是用户禁止提交"
+      ]
     },
     {
       "id": 6,
-      "prompt": "工作区的 package.json 已有我未提交的修改，暂存区也有 config/env/.env.test。现在新增 env=ca、cloudId=14、中台地址=https://middle.example.ca，完成模板管理并提交。",
-      "expected_output": "预检识别目标文件 package.json 在任务前已修改且暂存区非空，在写入任何文件前停止并询问用户处理方式；不覆盖、不暂存、不提交。",
-      "assertions": [
-        "写入前检查目标文件和暂存区",
-        "识别目标文件既有改动和已有 staged 内容",
-        "停止修改并请求用户先处理",
-        "不夹带、覆盖或提交用户改动"
+      "prompt": "请使用 iot-frontend-site-expansion 在当前 fixture 中新增 env=ca、cloudId=14、正式展示名=加拿大站、中台地址=https://middle.example.ca，完成模板管理并创建本地提交。",
+      "expected_output": "fixture 已真实包含 dirty package.json 和 staged config/env/.env.test；预检应在任何写入前停止，保持既有文件和 index 不变，不创建提交。",
+      "files": [],
+      "expectations": [
+        "预检从真实 Git 状态识别 package.json 在任务前已修改",
+        "预检从真实 Git index 识别 config/env/.env.test 已暂存",
+        "没有创建 config/env/.env.ca 或 config/vite.config.ca.ts",
+        "执行前后 package.json 内容及 staged env diff 完全一致",
+        "执行前后 HEAD 完全一致",
+        "最终回复要求用户先处理目标文件或暂存区"
       ],
-      "files": []
+      "assertions": [
+        "预检从真实 Git 状态识别 package.json 在任务前已修改",
+        "预检从真实 Git index 识别 config/env/.env.test 已暂存",
+        "没有创建 config/env/.env.ca 或 config/vite.config.ca.ts",
+        "执行前后 package.json 内容及 staged env diff 完全一致",
+        "执行前后 HEAD 完全一致",
+        "最终回复要求用户先处理目标文件或暂存区"
+      ]
     }
   ]
 }

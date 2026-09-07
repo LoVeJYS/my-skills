@@ -1,0 +1,50 @@
+[
+  {
+    "query": "请使用 iot-frontend-site-expansion 新增南非站，env=za、cloudId=11，中台地址我稍后补。",
+    "should_trigger": true
+  },
+  {
+    "query": "使用 iot-frontend-site-expansion 给现有 mea 环境补 VITE_SSO_GETTOKEN，只改这一个键。",
+    "should_trigger": true
+  },
+  {
+    "query": "帮我调用 iot-frontend-site-expansion 检查 india 的模板同步站点字段是否完整，不要提交。",
+    "should_trigger": true
+  },
+  {
+    "query": "iot-frontend-site-expansion：新增 br 环境和构建入口，验证通过后本地 commit。",
+    "should_trigger": true
+  },
+  {
+    "query": "请用 iot-frontend-site-expansion 分析 cloudId 冲突，只做预检不要写文件。",
+    "should_trigger": true
+  },
+  {
+    "query": "给 iot-platform-web 新增一个南非站，env=za，cloudId=11。",
+    "should_trigger": false
+  },
+  {
+    "query": "补一下 mea 的 SSO 回调，其他配置别动。",
+    "should_trigger": false
+  },
+  {
+    "query": "模板管理里还缺巴西站的同步状态，帮我看看。",
+    "should_trigger": false
+  },
+  {
+    "query": "不要使用 iot-frontend-site-expansion，我只想了解新增 env 一般要改哪些文件。",
+    "should_trigger": false
+  },
+  {
+    "query": "cloudId 12 有没有被占用？只回答，不要调用任何 Skill。",
+    "should_trigger": false
+  },
+  {
+    "query": "把 VITE_SSO_GETTOKEN 里的井号转义一下。",
+    "should_trigger": false
+  },
+  {
+    "query": "给 checkInstallBuild 增加一个构建分支，但不要做站点完整适配。",
+    "should_trigger": false
+  }
+]

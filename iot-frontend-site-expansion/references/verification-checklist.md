@@ -1,103 +1,87 @@
 # IoT 前端站点扩展验证清单
 
-按当前工作模式执行“公共检查”和对应模式清单，不要混用两种模式的必填项或提交信息。
+这是验证和交付的唯一检查清单。按“公共检查”及当前模式执行。
 
 ## 公共检查
 
-- [ ] 已明确当前是“新增站点模式”还是“已有 env 的 SSO 后补模式”。
-- [ ] 开始前已记录当前分支、`git status --short` 和 `git diff --cached --name-status`。
-- [ ] 任务开始前暂存区为空。
-- [ ] 所有计划修改的目标文件在任务开始前均无修改；否则已在写入前停止并询问用户。
-- [ ] 与目标文件无关的用户改动保持原样。
-- [ ] 已确认当前请求是否明确授权创建本地提交。
+- [ ] 用户明确点名 `iot-frontend-site-expansion`。
+- [ ] 已确定工作模式并记录 branch、HEAD、status 和 cached 文件。
+- [ ] 已从路由和调用链动态生成目标文件列表，再运行 preflight。
+- [ ] 目标文件任务前无修改；无关 staged 内容只阻止最终提交，不阻止调查和干净文件修改。
+- [ ] 已区分肯定提交授权、否定表达和 push 授权。
+- [ ] 已检查实际 hooks，不以 package script 代替 hook 文件。
+- [ ] 未输出 Gateway key 原值。
+- [ ] 用户原有 tracked、untracked 和 staged 资产保持原样。
 
 ## 新增站点模式
 
-### 输入与冲突
+### 输入与来源
 
-- [ ] cloudId、env、中台网关根地址均已提供。
-- [ ] env 符合小写英文代码格式。
-- [ ] 中台根地址是合法 HTTPS URL，且已去掉末尾 `/`。
-- [ ] env 未与现有环境重复。
-- [ ] cloudId 未被其他站点占用。
+- [ ] cloudId、env、HTTPS origin、正式 displayName 和 referenceEnv 已明确。
+- [ ] middleGateway 不含 credentials、path、query、hash 或末尾 `/`。
+- [ ] displayName 不是 env 大小写占位值。
+- [ ] SSO URL 来源为 provided 或明确 reuse:<env>。
+- [ ] Gateway app key/“secret”来源为 provided 或明确 reuse:<env>。
+- [ ] client ID、GETTOKEN 未提供时为空且没有猜测。
 
 ### 环境与构建
 
-- [ ] `config/env/.env.<env>` 存在。
-- [ ] `VITE_CLOUD_ID` 正确。
-- [ ] SSO client ID 和回调使用用户值；未提供时为空，不是猜测值。
-- [ ] 非空 `VITE_SSO_GETTOKEN` 包含 `#` 时，完整值已用双引号包住。
-- [ ] SSO URL、Gateway key 按用户要求复用。
-- [ ] `config/vite.config.<env>.ts` 存在且 mode 正确。
-- [ ] `package.json` 有 `build:<env>`。
-- [ ] `package.json` 有 `checkInstallBuild:<env>`。
-- [ ] `checkInstallBuild.cjs` 能把 env 转发到正确构建命令。
+- [ ] env、Vite config、build 和 checkInstallBuild 入口正确。
+- [ ] GETTOKEN 的 `#` 使用双引号并经 Vite 完整解析。
+- [ ] checkInstallBuild 使用白名单，未知 env 在任何副作用前失败。
+- [ ] checkInstallBuild 不自动联网安装；缺依赖时提示使用受信 registry 按 lockfile 准备。
 
-### 服务与请求
+### 服务与调用链
 
-- [ ] 所有支持生产站点的服务组均有新 cloudId。
-- [ ] 服务 URL 使用用户提供的根地址和现有路径后缀。
-- [ ] dev/test 专属服务未被臆造生产地址。
-- [ ] 站点直连映射包含 `<env> -> <cloudId>`。
-- [ ] 词条同步能解析到目标 DTS，而不是同源回退。
+- [ ] 已动态枚举服务组，新 cloudId 只进入生产组。
+- [ ] 每个新服务 URL 的 origin 等于用户根地址。
+- [ ] 每个新服务 URL 的 pathname 与 referenceEnv 对应组一致。
+- [ ] dev/test-only 服务没有生产猜测值。
+- [ ] 真实跨站调用链已追踪，env→cloudId 映射合法。
+- [ ] 词条同步不会因空地址回退同源。
 
 ### 模板管理
 
-- [ ] 路由中的全部模板管理子功能均已枚举并检查。
-- [ ] 模板同步下拉包含新 env。
-- [ ] 模板同步编辑条件包含新状态。
-- [ ] 模板同步删除条件包含新状态。
-- [ ] 模板同步状态、时间、同步人列完整。
-- [ ] 同步人类型和页面统一为实际运行时字段（通常为 `*UserNo`）。
-- [ ] 模板类型按现有建模粒度增加状态和时间。
-- [ ] 测点自描述包含新站点选项、按钮条件和汇总状态。
-- [ ] 枚举值自描述包含新站点选项、按钮条件和汇总状态。
-- [ ] 国家自描述包含新站点选项、按钮条件和汇总状态。
-- [ ] 电网类型自描述包含新站点选项、按钮条件和汇总状态。
-- [ ] 自描述类型未只声明一个孤立的新站点状态字段。
-- [ ] 新站点走普通 JSON 同步分支，EU 特判未被误复制。
+- [ ] 模板同步页分别验证 option、编辑条件、删除条件、状态列、时间列、同步人列和 Task 字段。
+- [ ] 状态 formatter 读取本列字段。
+- [ ] 每个动态发现的自描述页分别验证 option、未同步条件和汇总状态。
+- [ ] 普通站点未复制 EU 文件分支。
+- [ ] 路由和权限没有被无依据复制。
 
-### 校验
+### 验证
 
-- [ ] `package.json` 可解析。
-- [ ] `node --check scripts/checkInstallBuild.cjs` 通过。
-- [ ] 改动的 TS/Vue 文件已用不带 `--fix` 的定向 ESLint 校验。
-- [ ] `git diff --check` 通过。
-- [ ] `npm run tsc -- --incremental false` 的结果已记录并区分既有错误。
-- [ ] `npm run build:<env>` 成功且加载正确 mode。
-- [ ] 最终搜索覆盖 env、cloudId、状态、时间和同步人字段。
-- [ ] 最终 diff 无临时文件、假值和无关改动。
+- [ ] 修改前 typecheck 基线已保存；没有基线时未声称错误既有。
+- [ ] `verify-site.mjs` 使用 referenceEnv、配置来源、模板页和自描述页参数通过。
+- [ ] Node 语法、定向 ESLint、Prettier、`git diff --check` 通过。
+- [ ] 未跟踪文件已直接读取检查。
+- [ ] 修改后 typecheck 已与基线比较。
+- [ ] `npm run build:<env>` 成功。
+- [ ] 最终审查覆盖 tracked、untracked 和 staged 内容。
 
 ## 已有 env 的 SSO 后补模式
 
-- [ ] `config/env/.env.<env>` 已存在。
-- [ ] `package.json` 中 `build:<env>` 已存在。
-- [ ] 只修改用户明确提供的 `VITE_SSO_CLIENTID` 和/或 `VITE_SSO_GETTOKEN`。
-- [ ] 用户未提供的另一个 SSO 值保持原样。
-- [ ] 用户未明确要求清空时，没有把已有 SSO 值改为空。
-- [ ] 非空 `VITE_SSO_GETTOKEN` 包含 `#` 时，完整值写成双引号形式。
-- [ ] env 文件中除预期 SSO 键外的其他配置保持原样。
-- [ ] `git diff --check` 通过。
-- [ ] `npm run build:<env>` 成功且加载正确 mode。
-- [ ] 最终 diff 只包含预期的 SSO 改动。
+- [ ] env 和 `build:<env>` 存在。
+- [ ] preflight 的 `--sso-keys` 至少包含一个用户明确提供的键。
+- [ ] verify 为被修改键传入 expected 值，为未修改键传入 preserved 值。
+- [ ] 清空操作显式使用 `--allow-clear=true`。
+- [ ] GETTOKEN 中的 `#` 被双引号保护并完整解析。
+- [ ] 其他配置逐字保持不变。
+- [ ] `verify-site.mjs --mode=sso`、diff check 和 build 通过。
+- [ ] 已说明空 SSO 对登录、登出及环境识别的影响。
 
-## Git（仅用户明确授权提交时）
+## Git（仅明确授权本地提交时）
 
-- [ ] 仅按文件名显式暂存本次文件，未使用 `git add .` 或 `git add -A`。
-- [ ] `git diff --cached --name-status` 和 `git diff --cached` 已逐项审查。
-- [ ] 未包含任务开始前的改动或其他无关内容。
-- [ ] hooks 未跳过。
-- [ ] 新增站点使用 `feat: add <env> template management support`；SSO 后补使用 `chore: configure <env> SSO`。
-- [ ] 已记录 commit hash 并检查实际 commit 文件列表。
-- [ ] 未 push。
+- [ ] 提交门禁处暂存区不存在无关内容。
+- [ ] 只按文件名显式暂存，cached 文件集合等于 allowlist。
+- [ ] 实际 hooks 保留；hook 改写后的 commit patch 已重新审查和验证。
+- [ ] commit message 正确，完整 commit patch 已检查。
+- [ ] 已记录 hash，确认未 push。
 
-未获得提交授权时：
-
-- [ ] 未暂存、未提交，并已在最终回复中说明。
+未授权提交时：未暂存、未提交，并准确说明原因。
 
 ## 交付
 
-- [ ] 汇报修改范围和验证结果。
-- [ ] 说明已提交或未提交的准确状态及原因。
-- [ ] SSO 为空时说明 `config/env/.env.<env>` 的补充方式。
-- [ ] 告知用户后续可提供值，由 Skill 进入 SSO 后补模式自动修改和构建；仅在明确授权时提交。
+- [ ] 汇报实际修改和每条验证结果。
+- [ ] 错误归因有修改前后证据。
+- [ ] 只列缺失的 SSO 键。
+- [ ] 后续调用示例明确点名本 Skill。

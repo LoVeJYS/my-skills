@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "142d461d-c4bc-4ad0-843c-09d1af6773b2",
+  "path": "aihot",
+  "path_key": "aihot",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "kkkkhazix/khazix-skills/aihot",
+    "subpath": "aihot",
+    "branch": null
+  }
+}

@@ -4,7 +4,7 @@
 >
 > 安全说明：不要填写明文密码、Token、私钥、证书内容或带 userinfo 的 URI。真实秘密仅通过组织认可的安全渠道提供。
 
-## 1. 调用与范围
+## 1. 调用、范围与两个参考 profile
 
 ```yaml
 skill: iot-backend-site-expansion
@@ -13,6 +13,10 @@ allowedScopes: []
 excludedScopes:
   - ECO
 addressMode: template-only | safe-placeholder | complete
+references:
+  # 这两个输入必须由用户明确指定；即使相同也不能省略任一项。
+  primaryReferenceProfile: ""
+  returnReferenceProfile: ""
 repository:
   language: java-jvm | rust
   buildSystem: maven | gradle | cargo | repository-wrapper
@@ -21,6 +25,14 @@ repository:
   applicationSiteSelector: ""
   migrationFramework: not-used | flyway | liquibase | seaorm | diesel | sqlx | custom
 ```
+
+| 输入 | 用户必须指定 | 用途 | 不能自动承担的用途 |
+| --- | --- | --- | --- |
+| `primaryReferenceProfile` | 是 | 调查结构、能力、拓扑与实施对称性 | 生成回填对照块 |
+| `returnReferenceProfile` | 是 | 生成第 6.2 节的同构回填对照块 | 作为实施的主参考 |
+| 次参考 profile | 否；需声明单一用途 | 仅补充某一已声明细节 | 替代上述任一必填输入 |
+
+两者可使用相同 profile，但必须在输入中分别填写相同值。空值、别名歧义、无法解析的 profile 均为阻塞项；不得默认复用、推断或自行选择。
 
 ## 2. 站点状态与字段来源
 
@@ -43,20 +55,23 @@ repository:
 | `[仅调查发现的条件身份字段]` | `[待填写]` | `local-static` / `local-code` / `user-confirmed` |  |  | 是 |
 | `[Nacos Data ID 内字段]` | `[外部待办]` | `external-config` |  | Nacos/运维 | 否 |
 
-## 3. 参考站点
+## 3. 参考调查记录
 
-| 用途 | 明确 profile/标识 | 可参考能力 | 不可复制的异常 | 证据 |
-| --- | --- | --- | --- | --- |
-| 主参考站点 | `[必须填写]` |  |  |  |
-| 次参考站点 | `[按需]` | `[单一用途]` |  |  |
+| 角色 | 用户指定 profile | 调查范围 | 可参考能力 | 不可复制的异常 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| 主参考 | `[primaryReferenceProfile]` | 结构、能力、分支、拓扑、实施影响 |  |  |  |
+| 回填对照 | `[returnReferenceProfile]` | 仅第 6.2 节本地字段对照 |  |  |  |
+| 次参考 | `[按需]` | `[单一用途]` |  |  |  |
+
+主参考与回填对照 profile 不同时：仅以主参考决定实施影响面；仅以回填对照生成第 6.2 节字段值。不得将一方的能力、地址或异常自动带入另一方。
 
 参考 profile 的真实地址只有在用户要求、且确实有助于对照本地配置时才展示。展示时标记为只读参考，绝不能作为新站临时值。
 
 ## 4. 本地配置影响矩阵
 
-本表只覆盖仓库内文件、源码和已确认的本地配置键。
+本表只覆盖仓库内文件、源码和已确认的本地配置键。实施对称性以 `primaryReferenceProfile` 为依据。
 
-| module/package | 能力 | 字段/端点 | 来源类型 | 参考文件/符号 | 目标文件/符号 | 状态 | 验证 |
+| module/package | 能力 | 字段/端点 | 来源类型 | 主参考文件/符号 | 目标文件/符号 | 状态 | 验证 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 |  |  |  | `local-static` / `local-code` / `user-confirmed` |  |  |  |  |
 
@@ -76,11 +91,12 @@ repository:
 
 生成器必须根据第 2.2 节动态生成这两个块：
 
-- 目标块与参考块的键、层级和顺序**完全一致**；
+- 目标块与对照块的键、层级和顺序**完全一致**；
 - 仅保留本地配置、源码或用户确认的字段；
 - 标量未知值使用 `null`，数组未知值使用 `[]`；不要在 YAML 中使用 `[待填写]`、`[待填写/not-used]`、`true | false` 等非数据值；
 - 外部 Nacos Data ID 内部配置不在块中；
-- 参考值 `null` 表示本地不可见或不适用，不能猜测。
+- 对照值 `null` 表示本地不可见或不适用，不能猜测；
+- 第 6.2 节必须使用用户指定的 `returnReferenceProfile`，绝不默认使用 `primaryReferenceProfile`。
 
 ### 6.1 [目标 profile] 回传块
 
@@ -96,13 +112,13 @@ commonEndpoints:
   # 示例：nacosDiscovery、nacosConfig、redis、snSync、mqttGateways。
 ```
 
-### 6.2 [参考 profile] 对照块
+### 6.2 [returnReferenceProfile] 回填对照块
 
 ```yaml
 continueWithSkill: iot-backend-site-expansion
 
 site:
-  env: "[参考 profile]"
+  env: "[用户指定的 returnReferenceProfile]"
   # 字段集合、层级与 6.1 完全相同；不可见值写 null。
 
 commonEndpoints:
@@ -111,13 +127,13 @@ commonEndpoints:
 
 ## 7. 地址拓扑与安全占位
 
-仅对已发现或用户确认的资源填写；未知外部配置只在第 5 节列待办。
+仅对已发现或用户确认的资源填写；未知外部配置只在第 5 节列待办。拓扑和实施影响以 `primaryReferenceProfile` 为依据；第 6.2 节显示值以 `returnReferenceProfile` 为依据。
 
 ### 7.1 通用端点
 
-| logicalResourceId | 来源位置 | 参考值 | 目标值 | 协议 | 端口 | reuseGroup | 状态 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-|  |  |  |  |  |  |  |  |
+| logicalResourceId | 来源位置 | 主参考结构 | 回填对照值 | 目标值 | 协议 | 端口 | reuseGroup | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+|  |  |  |  |  |  |  |  |  |
 
 ### 7.2 JDBC、Redis、Kafka
 
@@ -152,9 +168,12 @@ rollbackStrategy: null
 
 ## 9. 验收
 
+- [ ] 用户已分别明确提供 `primaryReferenceProfile` 与 `returnReferenceProfile`；即使同值也有两项输入记录。
+- [ ] 两个 profile 都是可解析的实际应用站点标识，不是 Cargo build profile、别名或推断值。
 - [ ] 目标状态已区分为上线、未完成骨架、部分完成或不存在。
 - [ ] 第 6 节仅含有证据支持的本地字段；没有泛化身份字段。
-- [ ] 目标与参考回传块的字段集合、层级和顺序一致。
+- [ ] 目标与回填对照块的字段集合、层级和顺序一致。
+- [ ] 回填对照块仅从 `returnReferenceProfile` 读取；实施影响矩阵仅从 `primaryReferenceProfile` 建立。
 - [ ] 回传块不含外部 Nacos Data ID 内部配置、明文秘密或非数据占位语法。
 - [ ] `.invalid` 占位均已授权，并区分已有与本次新增。
 - [ ] 外部配置待办包含工件、责任方和前置条件。

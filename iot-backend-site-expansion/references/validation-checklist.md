@@ -26,17 +26,21 @@
 - [ ] 没有为账号前缀、时区、币种、UUID、tenant key 或其他无契约概念创建字段、`null` 或待填项。
 - [ ] `siteId/cloudId` 等条件身份字段只在代码读取点、已知配置键或用户输入存在时出现。
 - [ ] 应用站点标识符合仓库规则且不冲突；Rust Cargo build profile 未被误当应用 profile。
+- [ ] 用户已分别明确指定 `primaryReferenceProfile` 与 `returnReferenceProfile`；两者同值时也有两项独立输入记录。
+- [ ] 两个参考 profile 都解析为实际应用站点标识；没有用别名、Cargo build profile、推断值或默认值替代。
 - [ ] Nacos Data ID、Vault、CI/CD、数据库或站点注册内容标为 `external-config`，只出现在外部待办。
 - [ ] 外部待办具备系统、工件、责任方、动作和发布前置条件。
 
 ## 4. 回传块与参考对照
 
+- [ ] `primaryReferenceProfile` 只用于结构、能力、拓扑与实施影响分析；没有自动作为回填对照来源。
+- [ ] `returnReferenceProfile` 是参考回传块的唯一来源；没有自动承担主参考职责。
 - [ ] 目标 profile 回传块只包含仓库本地配置、源码直接引用或用户确认字段。
 - [ ] 外部 Nacos Data ID 内部配置、动态 datasource、Kafka broker、CI/CD Secret 等没有进入本地回传块。
-- [ ] 目标与参考回传块的键集合、层级、顺序和数据类型一致。
-- [ ] 参考 block 的 `null` 明确表示本地不可见或不适用；没有用猜测值、目标值或参考异常填充。
+- [ ] 目标与 `returnReferenceProfile` 回传块的键集合、层级、顺序和数据类型一致。
+- [ ] 回填对照 block 的 `null` 明确表示本地不可见或不适用；没有用猜测值、目标值、主参考值或参考异常填充。
 - [ ] 可复制 YAML/JSON 使用 `null`、`[]`、合法布尔值或真实值；不含 `[待填写]`、`[待填写/not-used]`、`true | false` 等非数据值。
-- [ ] 只有用户明确要求时才展示参考真实地址；展示后标记只读，不能作为新站临时值。
+- [ ] 只有用户明确要求时才展示回填对照 profile 的真实地址；展示后标记只读，不能作为新站临时值。
 - [ ] 模板、报告和命令输出不含明文密码、Token、私钥、证书或 URI userinfo。
 
 ## 5. 地址、拓扑与凭据

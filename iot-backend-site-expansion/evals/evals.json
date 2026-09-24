@@ -115,6 +115,19 @@
         "未知值使用 null 或 []，不出现 [待填写]、[待填写/not-used] 或 true | false。",
         "参考真实地址仅作为只读对照，明确不能复制到 MEA。"
       ]
+    },
+    {
+      "id": 9,
+      "name": "explicitly-separate-primary-and-return-reference-profiles",
+      "prompt": "使用 iot-backend-site-expansion 给 Java 仓库新增 mea，范围只改 iot-platform-dts 和 iot-platform-device-manage。主参考 profile 是 india，真实地址未齐但授权 .invalid。本轮只输出下一步应该向我确认什么，不修改文件。",
+      "expected_output": "Skill 应接受已给出的主参考 profile，但必须停止实施并单独要求用户指定回填对照 profile；不得默认使用 india，也不得自行选择 hk、base 或其他 profile。",
+      "files": ["evals/fixtures/java-multimodule-repo.md"],
+      "expectations": [
+        "明确区分 primaryReferenceProfile（调查与实施）和 returnReferenceProfile（参考回填块）。",
+        "明确要求用户提供 returnReferenceProfile，并说明即使希望与 india 相同，也需要写出该确认。",
+        "在 returnReferenceProfile 缺失时，不开始调查替代 profile、生成参考回填块、实施配置或复制参考地址。",
+        "保留用户已确认范围、主参考 profile、.invalid 授权和 ECO 禁令。"
+      ]
     }
   ]
 }

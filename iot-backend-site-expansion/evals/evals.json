@@ -88,6 +88,33 @@
         "优先使用 cargo metadata 以及针对 device-api/sync-worker 的 cargo check/test，不无依据使用全 workspace 或 --all-features。",
         "地址不齐时只调查并始终生成 Java/Rust 通用模板，不使用占位、不修改文件、不执行迁移、不暂存提交或推送。"
       ]
+    },
+    {
+      "id": 7,
+      "name": "existing-invalid-skeleton-completion",
+      "prompt": "使用 iot-backend-site-expansion 给 Java 仓库补齐 mea。只允许改 iot-platform-dts 和 iot-platform-device-manage；主参考 india；用户授权使用 .invalid。调查发现 mea profile、.invalid Nacos/Redis/MQTT/SN 地址以及部分客户端已存在，但没有真实外部配置或部署证据。请只输出计划与回填模板结构，不修改文件。",
+      "expected_output": "Skill 应把 mea 识别为 incomplete-skeleton 而非已上线站点或完全不存在的站点；保留已有 profile 和占位，生成差异矩阵，只提出缺口；本地回填与外部 Nacos 待办分开。",
+      "files": ["evals/fixtures/java-multimodule-repo.md"],
+      "expectations": [
+        "将已有 .invalid、空连接或未接入分支明确识别为未完成骨架，不因 profile 已存在而停止新增流程。",
+        "区分已有占位与需新增占位，不复制 india 的真实地址，也不重建已经存在的配置。",
+        "本地回填块只保留本地 bootstrap、源码常量或用户确认字段；Nacos Data ID 内容列为外部待办。",
+        "明确 ECO 零改动、指定范围不扩大、遵守本轮不修改文件。"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "local-return-block-vs-external-nacos",
+      "prompt": "调用 iot-backend-site-expansion 给 Java 服务新增 mea，主参考 india，范围只限两个服务。India 的 bootstrap 中有 Nacos server-addr、Redis host 与 SN client；DTS 的 datasource、Kafka 和 Feign URL 只存在于 Nacos Data ID。请只输出可复制的 MEA 回传块、与其完全同构的 India 对照块，以及外部待办，不修改文件。仓库里没有 accountPrefix、时区、币种或 tenant key。",
+      "expected_output": "Skill 应生成同构的目标/参考本地回传块；Nacos Data ID 内部配置仅列外部待办；不生成没有契约的身份字段；可复制 YAML 使用合法 null，而非方括号占位或逻辑表达式。",
+      "files": ["evals/fixtures/java-multimodule-repo.md"],
+      "expectations": [
+        "MEA 与 India 回传块的键、层级和顺序相同，并仅包含本地静态配置、源码直接引用或用户确认字段。",
+        "不在任何回传块中出现 datasource alias、Kafka broker、Feign URL 或其他 Nacos Data ID 内部内容；这些内容应在独立外部待办中列出 Data ID、责任方和动作。",
+        "不生成 accountPrefix、时区、币种、UUID 或 tenant key 等没有仓库契约的字段。",
+        "未知值使用 null 或 []，不出现 [待填写]、[待填写/not-used] 或 true | false。",
+        "参考真实地址仅作为只读对照，明确不能复制到 MEA。"
+      ]
     }
   ]
 }

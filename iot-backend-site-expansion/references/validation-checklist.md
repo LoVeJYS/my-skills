@@ -1,167 +1,91 @@
-# Java/Rust 新增后端站点验证清单
+# 后端站点扩展验证清单
 
-根据仓库技术栈选择适用项，但“范围、ECO、身份、地址/拓扑、代码契约、构建、迁移、Git”检查不可省略。
+按 Java/JVM 或 Rust/Cargo 实际技术栈选择适用项。范围、ECO、字段来源、回传块、拓扑、构建、迁移、Git 和新建文档检查不可省略。
 
-## 1. 范围与工作树
+## 1. 范围、工作树与目标状态
 
-- [ ] 实际改动仅位于用户允许的 Java module/service、Rust package/crate，以及用户允许的迁移/文档目录。
-- [ ] Cargo workspace 根清单仅在 member/dependency/feature 等确有必要时修改，没有因“指定 crate”机械扩大范围。
-- [ ] 没有覆盖、丢失或误改任务开始前的用户内容；获授权编辑冲突文件时保留了原有改动。
-- [ ] 没有修改 Maven/Cargo `target/`、Gradle `build/`、其他构建产物、IDE、索引和依赖目录。
-- [ ] 已从 `.cargo/config.toml`、环境或构建脚本识别并排除自定义 Rust `target-dir`（若存在）。
-- [ ] 没有残留临时报告、评测输出或空配置文件。
+- [ ] 已记录分支、`git status --short`、暂存状态和任务开始前的用户改动。
+- [ ] 实际改动仅位于允许的 module/package/crate、明确允许的文档或迁移目录。
+- [ ] 未覆盖或删除任务开始前的用户内容；目标文件已有用户改动时已先取得决定。
+- [ ] 未修改构建产物、IDE、索引、依赖目录或无关文件。
+- [ ] 已将目标分类为 `live-existing`、`incomplete-skeleton`、`partial` 或 `absent`。
+- [ ] 已有 `.invalid`、空地址或未接入分支时，按未完成骨架处理，而非误报为已上线。
 - [ ] `git diff --check` 通过。
-- [ ] 未自动暂存本次改动；如用户明确授权暂存，仅暂存已确认的本次文件。
-- [ ] 最终 `git status --short` 已人工复核。
+- [ ] 对新建或未跟踪文档另行检查行尾空白；`git diff --check` 不能覆盖未跟踪文件。
+- [ ] 最终 `git status --short` 已人工复核；未自动暂存、提交或推送。
 
 ## 2. ECO 硬性禁令
 
-- [ ] Git 状态和 diff 中没有路径或内容语义为 ECO 的新增、修改或删除。
-- [ ] 没有 `bootstrap-eco`、`application-eco`、`profile=eco`、`config/eco.toml`、ECO feature/group 等新增或复制内容。
-- [ ] 没有因复制参考目录、crate、resource 或部署目录而带入 ECO 配置。
+- [ ] 没有路径或内容语义属于 ECO 的新增、修改或删除。
+- [ ] 没有 `bootstrap-eco`、`application-eco`、`profile=eco`、ECO group/feature 或相关部署资源。
+- [ ] 复制参考资源时没有带入 ECO 文件、配置或异常分支。
 
-若任一项失败，撤销本次产生的 ECO 变更后再继续；不得删除用户原有 ECO 文件。
+## 3. 字段来源、身份与配置归属
 
-## 3. 技术栈与站点身份
+- [ ] 每个回传字段都有 `local-static`、`local-code` 或 `user-confirmed` 证据。
+- [ ] 没有为账号前缀、时区、币种、UUID、tenant key 或其他无契约概念创建字段、`null` 或待填项。
+- [ ] `siteId/cloudId` 等条件身份字段只在代码读取点、已知配置键或用户输入存在时出现。
+- [ ] 应用站点标识符合仓库规则且不冲突；Rust Cargo build profile 未被误当应用 profile。
+- [ ] Nacos Data ID、Vault、CI/CD、数据库或站点注册内容标为 `external-config`，只出现在外部待办。
+- [ ] 外部待办具备系统、工件、责任方、动作和发布前置条件。
 
-- [ ] 已确认语言为 Java/JVM 或 Rust，以及 Maven/Gradle/Cargo/仓库封装构建入口。
-- [ ] 应用级 env/站点标识符合仓库命名规则且未被占用。
-- [ ] 主参考站点已解析为明确的应用配置、enum、feature 或其他仓库标识。
-- [ ] siteId/cloudId、UUID、tenant key、中文名等只在仓库确有契约时校验；不适用项标为 `not-used`。
-- [ ] 所有实际采用的身份字段都未与现有站点冲突，并写入真实所有权系统或列为外部待办。
-- [ ] 未把身份值误作 clusterFlag、Redis database、端口或业务状态码。
-- [ ] Rust Cargo `[profile.*]` 与应用站点 profile 已明确区分，没有创建无依据的 `[profile.<site>]`。
+## 4. 回传块与参考对照
 
-## 4. 地址、拓扑与凭据
+- [ ] 目标 profile 回传块只包含仓库本地配置、源码直接引用或用户确认字段。
+- [ ] 外部 Nacos Data ID 内部配置、动态 datasource、Kafka broker、CI/CD Secret 等没有进入本地回传块。
+- [ ] 目标与参考回传块的键集合、层级、顺序和数据类型一致。
+- [ ] 参考 block 的 `null` 明确表示本地不可见或不适用；没有用猜测值、目标值或参考异常填充。
+- [ ] 可复制 YAML/JSON 使用 `null`、`[]`、合法布尔值或真实值；不含 `[待填写]`、`[待填写/not-used]`、`true | false` 等非数据值。
+- [ ] 只有用户明确要求时才展示参考真实地址；展示后标记只读，不能作为新站临时值。
+- [ ] 模板、报告和命令输出不含明文密码、Token、私钥、证书或 URI userinfo。
 
-### 4.1 通用检查
+## 5. 地址、拓扑与凭据
 
-- [ ] 通用地址模板已生成或更新。
-- [ ] 每个可独立寻址端点都有映射，不存在“一替多”的歧义。
-- [ ] 新站点配置没有回退到参考站点真实地址。
-- [ ] 使用占位模式时，占位符均属于 `.invalid`，并列出文件、配置键和用途。
-- [ ] 协议、端口、namespace、database、TLS/SASL 参数已确认或明确待补。
-- [ ] Redis 空密码保持仓库客户端可绑定的合法写法。
-- [ ] 报告、模板和扫描输出未新增明文密码、token、私钥或 URI userinfo。
-- [ ] MySQL/PostgreSQL、Kafka、ClickHouse、Redis、HTTP/RPC、对象存储等外部配置均已确认使用或不使用。
+- [ ] 每个可独立寻址的本地端点都有映射；没有“一替多”歧义。
+- [ ] 新站本地配置没有回退或误连参考站点真实地址。
+- [ ] 使用占位模式时，每个 `.invalid` 有文件/配置键、用途、已有/新增状态和真实值责任方。
+- [ ] 协议、端口、namespace、database、TLS/SASL 参数有证据或明确待办。
+- [ ] JDBC alias、Kafka cluster/broker、Redis instance/node 只在实际配置或源码已枚举时建模；没有从服务名称猜测数量或结构。
+- [ ] Redis logical database 只引用 instance 和 database，不拥有 host、凭据、reuseGroup 或占位。
+- [ ] 同一 `reuseGroup` 仅来自用户确认或配置证据，规范地址集合一致；不因同址自动归组。
+- [ ] 参考站异常分支、不完整 enum/match 或不可达 client 已标记为不可参考。
 
-### 4.2 标识与引用完整性
+## 6. Java/JVM 与 Rust 构建
 
-- [ ] cluster、instance、node 和 `reuseGroup` ID 在站点内唯一。
-- [ ] 所有 `parentRef`、`kafkaClusterRef` 和 `redisInstanceRef` 都能解析到唯一父资源。
-- [ ] 没有把 logical database、topic、consumer group 当成可寻址主机。
+### Java/JVM
 
-### 4.3 多 JDBC 数据源
+- [ ] 已盘点根和目标 Maven/Gradle 清单、资源打包和实际启动入口。
+- [ ] YAML/JSON/properties 可解析，目标 profile 可被现有启动入口选择。
+- [ ] 先运行受影响目标 module 的构建；需要验证反应堆源码依赖时才运行 `-am`。
+- [ ] `-am` 失败时已区分本次变更、上游模块、JDK、编译插件和网络/仓库问题；未为绕过上游问题修改无关代码。
+- [ ] 新资源包含于实际 JAR、assembly、镜像或部署包。
 
-- [ ] 已从仓库实际配置枚举全部 JDBC datasource alias，而不是只搜索主库/只读库关键词。
-- [ ] 修改前后的 alias 集合和数量完全一致，没有新增、删除、合并或重命名 alias。
-- [ ] 每个 alias 都有独立、完整的新站 JDBC 地址；没有残留或回退到参考站地址。
-- [ ] 同一 alias 的多 host/list 保持仓库原生结构、节点数量和必要顺序，没有只替换第一项。
-- [ ] 配置前缀、`DataSource` Bean、连接池、`TransactionManager`、`SqlSessionFactory`/JPA、Mapper/entity 和动态路由绑定保持不变。
-- [ ] driver、用户名/凭据策略、database/schema 和 JDBC query 参数默认未改变；任何例外都有用户明确输入。
-- [ ] 地址相同的多个 alias 仍保持独立，没有自动合并或推断 `reuseGroup`。
-- [ ] 仅地址变化没有引入业务代码、Bean、Mapper 或数据库迁移修改。
-- [ ] JDBC URL 和报告均已脱敏，没有 userinfo、密码或敏感 query 值。
+### Rust/Cargo
 
-### 4.4 Kafka/消息系统
+- [ ] 已盘点 workspace `members/exclude/default-members`、package manifest、配置加载路径和自定义 target-dir。
+- [ ] 已确认应用站点选择器与 Cargo `[profile.*]` 不同。
+- [ ] 针对受影响 package 执行 `cargo metadata --no-deps --format-version 1`、`cargo check` 和必要 `cargo test`；不无依据使用全 workspace 或 `--all-features`。
 
-- [ ] 每个消息 cluster 独立记录配置来源、认证和逻辑资源，未合并为全局 cluster。
-- [ ] 每个 Kafka cluster 的 broker 数量与已确认输入/参考能力一致，bootstrap servers 未漏项、未跨 cluster 合并。
-- [ ] 每个 broker 有独立地址记录；安全占位按 broker 生成，不用一个主机替代整个 cluster。
-- [ ] Topic、consumer group、queue、exchange 与所属 cluster 的引用正确。
+## 7. 代码、迁移与外部验证
 
-### 4.5 Redis
+- [ ] 客户端、分支、序列化、持久化和启用条件与可参考能力对称；没有复制参考站异常。
+- [ ] 已识别实际迁移框架和所有权；迁移仅创建/静态校验，未执行。
+- [ ] Nacos Data ID、Secret/Vault、数据库、Kafka、Redis、网络 ACL 和站点注册的发布待办已交给相应责任方。
+- [ ] 未验证真实连通性时不宣称上线可用。
 
-- [ ] 每个 Redis instance 都有明确 mode：`standalone`、`cluster` 或 `sentinel`。
-- [ ] standalone、cluster、sentinel 的节点数量和 `nodeRole` 与模式匹配。
-- [ ] Sentinel 的 sentinel nodes、data primary/replica 和 `masterName` 分开校验，未把 sentinel 地址当数据地址。
-- [ ] 每个 Redis logical database 仅包含 `redisInstanceRef + database`，没有 host、port、node、凭据、`reuseGroup` 或占位符。
-- [ ] 多个 logical database 可以引用同一 instance，未因此复制 Redis 主机配置。
-- [ ] Redis Cluster 使用 database 0；若非 0，已有仓库客户端能力和用户确认作为证据。
-- [ ] `.invalid` 占位按 Redis data/sentinel node 生成，不按 logical database 生成。
+## 8. 最终报告
 
-### 4.6 地址复用
-
-- [ ] `reuseGroup` 仅来自用户确认或配置证据，没有因地址字符串相同自动推断。
-- [ ] 同一 `reuseGroup` 的规范化目标地址集合一致，消费者清单完整。
-- [ ] 地址复用没有合并业务配置键、Java bean/Rust client、topic/group、database 或能力分支。
-- [ ] 不同或空 `reuseGroup` 的资源没有被误合并。
-
-## 5. 代码与数据对称性
-
-对每个参考站点能力记录计数或集合：
-
-- [ ] 客户端或 trait 方法集合、路径、参数、header、唯一身份和启用条件一致。
-- [ ] 每个参考调用分支或 `match` arm 都有对应新站点分支。
-- [ ] 结果字段、失败默认值、错误和返回值语义一致。
-- [ ] 序列化模型/字段、持久化映射、数据库列和迁移命名一致。
-- [ ] Java 已检查适用的 DTO/entity、Jackson、Feign contextId、Mapper/JPA。
-- [ ] Rust 已检查适用的 struct/enum、serde rename/default、trait impl、client builder、SeaORM/Diesel/sqlx model、`Option/Result`。
-- [ ] 站点白名单、菜单、定时任务、同步目标只在能力确认后加入。
-- [ ] 未复制参考站点的历史异常分支或错误返回语义。
-
-## 6. Java/JVM 配置与构建（适用时）
-
-- [ ] 根和目标 module 的 Maven/Gradle 清单已盘点，即使其中没有参考站点 token。
-- [ ] YAML/JSON/TOML/properties 可解析，应用 profile 能被现有启动入口选择。
-- [ ] 新资源会被现有 Maven/Gradle/assembly/镜像流程打包。
-- [ ] 不需要改 POM/Gradle 时没有多余改动。
-- [ ] 使用仓库 wrapper、CI 或推荐命令完成目标 module 的编译、类型检查、lint 或最小测试。
-
-## 7. Rust/Cargo 配置与构建（适用时）
-
-- [ ] 根/虚拟 `Cargo.toml` 与 package manifests 已盘点，workspace `members/exclude/default-members` 关系正确。
-- [ ] workspace dependency、feature 和 package 选择没有因新增站点产生无依据改动。
-- [ ] `.rs` 中 enum/match/serde/trait/client 契约与参考站点对称。
-- [ ] `build.rs`、`include_str!`、`env!`、config-rs/figment/dotenvy 等实际加载路径已检查。
-- [ ] Cargo build profile 未被误当应用站点 profile。
-- [ ] `cargo metadata --no-deps --format-version 1` 或仓库等价命令验证 workspace 成功。
-- [ ] 针对受影响 package 执行仓库推荐的 `cargo check` 和必要 `cargo test`。
-- [ ] 仅在仓库 CI 明确要求时使用 `clippy`、`fmt`、`--all-targets`、`--all-features` 或全 workspace 验证。
-
-## 8. 配置绑定与构建共性
-
-- [ ] 逗号列表、数组、map、URI、Sentinel `masterName` 和 Redis database 能被实际客户端正确绑定，不只通过文本语法检查。
-- [ ] 多 broker/node 配置保持仓库原生数据形态和必要顺序，没有被扁平化或截断。
-- [ ] 新资源会被实际构建、镜像和部署流程包含。
-- [ ] 构建失败已区分本次错误、上游 module/crate、JDK/Rust toolchain、网络和依赖仓库问题。
-
-## 9. 数据库迁移
-
-- [ ] 已识别仓库实际迁移框架：Flyway/Liquibase/SeaORM/Diesel/sqlx/自定义/不使用。
-- [ ] 迁移目录、注册方式和命名符合框架约定。
-- [ ] SeaORM migration crate/MigratorTrait、Diesel up/down/schema、sqlx migrations/离线元数据等适用契约已校验。
-- [ ] 新列/表与 Java ORM 或 Rust model 契约一致。
-- [ ] 已考虑历史数据、默认值、NULL/NOT NULL 和回滚策略。
-- [ ] 未运行生产 SQL，也未执行 `sea-orm-cli migrate`、`diesel migration run`、`sqlx migrate run` 等迁移命令。
-- [ ] 最终报告明确执行责任方及“先迁移、后部署”或仓库实际顺序。
-
-## 10. 外部配置
-
-- [ ] 配置中心 Data ID/group/namespace 或 Rust 应用配置文件/变量清单完整。
-- [ ] Secret/Vault/CI/CD/Kubernetes/站点注册系统待办明确。
-- [ ] 条件身份字段、账号前缀、功能开关、调度站点等不在仓库时有明确责任方。
-- [ ] 真实连通性未验证时不宣称上线可用。
-
-## 11. 最终报告
-
-至少包含：
+至少报告：
 
 ```text
-语言与构建系统
-范围：全仓扫描或指定 module/package/crate
-已修改文件
-未修改/不适用能力与条件身份字段
-应用站点选择器（Rust 需说明与 Cargo build profile 的区别）
-地址模板路径
-JDBC datasource alias 数、逐 alias 地址映射与地址外配置零变更
-Kafka cluster 数与各 cluster broker 数
-Redis instance 数、mode、各角色 node 数与 logical database 数
-reuseGroup 清单和确认依据
-未解析 parent/ref（应为零）
-迁移框架、工件、执行责任方和发布顺序
-剩余占位符
-外部配置待办
-验证命令和结果
-Git 是否提交/推送
+站点状态、语言与构建、允许范围
+本地代码/配置改动与已有骨架
+字段来源与本地回传块路径
+目标/参考回传块同构检查结果
+外部配置待办、责任方和发布前置条件
+已有/新增 .invalid 占位及数量
+拓扑计数、未解析 parent/ref 数
+迁移框架、执行责任方和发布顺序
+构建命令、结果与环境/上游失败区分
+Git 暂存/提交/推送状态
 ```

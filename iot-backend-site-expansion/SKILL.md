@@ -1,57 +1,57 @@
 ---
 name: iot-backend-site-expansion
-description: 为 Java/JVM 与 Rust/Cargo 后端仓库新增全新的区域站点、环境或应用级 site profile。先确认全仓或指定 module/package 范围，动态调查参考站点，始终生成地址回填模板，并在输入齐全后实施、生成但不执行迁移、完成验证。ECO 配置永久禁止。仅当用户明确点名调用 iot-backend-site-expansion 时使用；只提到新增站点、env、siteId、Cargo、Nacos、Kafka、Redis 等关键词时不要触发。
+description: 为 Java/JVM 与 Rust/Cargo 后端仓库新增区域站点、环境或应用级 site profile。显式调用后，先确认范围和参考站点，动态调查本地 profile、源码与外部配置归属，生成证据驱动的本地回填块和外部配置待办；输入齐全后实施、生成但不执行迁移并完成验证。ECO 永久禁止。仅当用户明确点名 iot-backend-site-expansion 时使用；只提到新增站点、env、siteId、Cargo、Nacos、Kafka、Redis 等关键词时不要触发。
 compatibility: 需要读写当前 Git 工作区、运行 Python 3，并可使用仓库自身的 Maven、Gradle、Cargo 或封装构建命令。
 ---
 
 # IoT 后端站点扩展
 
-## 调用门禁
+## 调用门禁与站点状态
 
-只有用户明确写出并要求使用 `iot-backend-site-expansion` 时才执行。本 Skill 只处理**全新站点**；目标站点已存在时停止，改按普通维护任务处理。
+只在用户明确写出并要求使用 `iot-backend-site-expansion` 时执行。
+
+发现目标 profile、目录或枚举时，先分类，不能仅凭名称停止：
+
+| 状态 | 证据 | 行为 |
+| --- | --- | --- |
+| 已上线站点 | 真实连接、外部配置与部署证据完整 | 停止新增流程，改按普通维护处理 |
+| 未完成骨架 | `.invalid`、空地址、缺失外部配置或未接入分支 | 继续“骨架补齐”流程；保留已有实现，只补缺口 |
+| 部分完成 | 仅部分能力有真实配置 | 生成差异矩阵，实施最小缺口 |
+| 不存在 | 未找到 profile 或等价站点选择器 | 按新增流程处理 |
 
 ## 不可变约束
 
-1. ECO 配置永久禁止新增、复制、修改或删除；文件、目录、应用 profile、group 或内容语义属于 ECO 都在禁区。
-2. 首次必须确认 `whole-repository` 或 `selected-modules`；全仓表示完整调查，不表示机械修改所有 module/crate。
-3. 每次动态调查，不把 Spring、Cargo workspace、当前仓库模块名或固定文件清单当作通用事实。
-4. 地址不完整时默认只调查并生成模板；只有用户明确授权，才可使用独立 `.invalid` 占位继续。
-5. 无论地址是否齐全，始终生成或更新通用站点输入/地址映射模板。
-6. 不复制参考站点真实地址作为新站点临时值，不猜测协议、端口、配置键或复用关系。
-7. 不在模板、报告或命令输出中新增明文密码、Token、私钥、证书或 URI userinfo，只记录凭据策略。
-8. 可以创建和校验迁移文件，但不执行生产 SQL、SeaORM/Diesel/sqlx/Flyway/Liquibase 等迁移命令。
-9. 保护任务开始前的用户改动和未跟踪文件；不修改构建产物、IDE 元数据、索引或无关文件。
-10. 默认不暂存、不提交、不推送；仅在用户明确授权时处理本次文件。
+1. ECO 配置永久禁止新增、复制、修改或删除；路径、profile、group、feature 或内容语义属于 ECO 都在禁区。
+2. 首次确认 `whole-repository` 或 `selected-modules`。全仓扫描不表示机械修改全部 module/crate。
+3. 每次动态调查；不把 Spring、Cargo workspace、当前模块名或固定文件清单当作通用事实。
+4. 地址不完整时默认只调查并生成模板；只有用户明确授权，才使用独立 `.invalid` 占位继续。
+5. 无论地址是否齐全，始终生成或更新输入模板；模板字段必须由仓库证据或用户输入驱动。
+6. 一个字段、占位符或回填项只有在以下情况才可出现：已在允许范围的源码/静态配置中发现、已确认外部配置键、或用户明确提供。不要为账号前缀、时区、币种、UUID、tenant key 等没有契约的概念生成字段。
+7. 不复制参考站点真实地址作为新站点临时值，不猜测协议、端口、配置键、节点数量、数据源 alias 或复用关系。
+8. 不在模板、报告或命令输出中新增明文密码、Token、私钥、证书或 URI userinfo；只记录凭据策略。
+9. 外部配置只列工件、所有权和动作；不伪造本地文件，不把外部 Nacos Data ID 内容混入本地 profile 回传块。
+10. 可以创建和校验迁移文件，但不执行生产 SQL、SeaORM/Diesel/sqlx/Flyway/Liquibase 等迁移命令。
+11. 保护任务开始前的用户改动和未跟踪文件；不修改构建产物、IDE 元数据、索引或无关文件。
+12. 默认不暂存、不提交、不推送；仅在用户明确授权时处理本次文件。
 
 ## 工作模式
 
 | 模式 | 使用条件 | 本轮结束点 |
 | --- | --- | --- |
-| 调查与模板（默认） | 输入、地址或范围信息不完整 | 生成模板后等待补填 |
-| 完整实施 | 范围、身份、参考站点、能力和连接信息齐全 | 实施并验证 |
-| 安全占位实施 | 地址未齐，但用户明确授权 `.invalid` | 实施、验证并列出全部占位 |
-| 续作 | 用户带回已填写模板 | 先校验，再实施或替换占位 |
+| 调查与模板 | 输入、地址或范围信息不完整 | 生成本地回填块和外部待办后等待补填 |
+| 骨架补齐 | 已有 `.invalid` 或部分 profile 实现 | 只补缺口，验证并列出剩余占位 |
+| 完整实施 | 范围、身份、参考站点、能力和连接信息完整 | 实施并验证 |
+| 安全占位实施 | 地址未齐且明确授权 `.invalid` | 实施、验证并列出每个占位 |
+| 续作 | 用户带回已填写模板 | 校验字段来源和外部待办后实施或替换占位 |
 
 ## 首次响应
 
-首次响应同时完成以下事项，不能只问一个范围问题：
+首次响应同时复述已知站点标识、范围、主参考站点和已知地址授权；只询问尚未提供且真正阻塞的内容。说明：
 
-1. 复述已知站点标识、仓库实际采用的身份字段和参考站点。
-2. 询问全仓还是指定 Java module/service 或 Rust package/crate/目录。
-3. 说明地址不齐时默认只调查和生成模板，资料齐全前不实施运行配置。
-4. 明确 ECO 不可绕过；当前不会修改文件、猜测地址或复制参考站点地址。
-
-建议格式：
-
-```text
-已记录：[站点标识、已知身份字段、参考站点]。
-
-本次是否扫描整个仓库？
-- 是：扫描全仓，只修改影响分析确认的文件。
-- 否：请提供允许修改的 Java module/service 或 Rust package/crate/目录。
-
-地址不齐时默认只调查并生成 Java/Rust 通用模板，补齐前不实施业务代码或运行配置。ECO 始终禁止。当前不会修改文件或猜测地址。
-```
+- ECO 不可绕过；
+- 地址未齐时不会猜测或复制参考地址；
+- 本地 profile 回填与外部配置待办会分开输出；
+- 目标 profile 已存在时先判断它是上线站点还是未完成骨架。
 
 ## 执行流程
 
@@ -59,101 +59,97 @@ compatibility: 需要读写当前 Git 工作区、运行 Python 3，并可使用
 
 记录：
 
-- `scopeMode`、`allowedScopes`、`excludedScopes`
-- 语言与构建系统：Java/JVM + Maven/Gradle，或 Rust + Cargo
-- 应用站点标识和明确的主参考站点
-- 可选次参考站点及其单一用途
-- 能力状态：`required`、`not-used`、`pending-confirmation`
-- 是否允许创建迁移、是否授权安全占位
+- `scopeMode`、`allowedScopes`、`excludedScopes`；
+- 语言与构建系统；
+- 目标应用站点标识和明确的主参考 profile；
+- 可选次参考及其唯一用途；
+- 是否允许迁移、是否授权安全占位；
+- 用户明确提供的身份值和连接信息。
 
-应用站点标识和主参考站点始终必需。`siteId/cloudId`、UUID、tenant key、中文名、时区等仅在仓库确有契约时必需，否则标记 `not-used`。别名必须解析成明确应用标识。Rust Cargo `[profile.*]` 默认是构建 profile，不是应用站点。
+应用站点标识与主参考站点始终必需。`siteId/cloudId` 等条件身份字段只在调查发现对应配置键、代码读取点或用户输入后记录；没有契约时省略，不要求用户填写 `not-used`。
 
 ### 2. 工作树预检
 
-修改前记录分支、`git status --short`、`git diff --cached --name-status` 和用户已有改动。目标文件已有用户改动时先说明冲突并等待决定。
+修改前记录分支、`git status --short`、`git diff --cached --name-status` 和用户已有改动。目标文件已有用户改动时，先说明冲突并等待决定。
 
-### 3. 动态调查
+### 3. 动态调查与字段归属
 
-读取 `references/repository-discovery.md`，按实际 Java/Rust 技术栈盘点 manifest、module/workspace、应用配置、源码契约、迁移、CI 和部署入口。
+读取 `references/repository-discovery.md`，按实际 Java/Rust 技术栈盘点 manifest、module/workspace、静态应用配置、源码契约、迁移、CI 和部署入口。可使用只读扫描器，但扫描报告不能替代配置与源码盘点。
 
-可使用只读扫描器提供 token 与端点线索；从实际 Skill 安装目录解析路径：
+为每个发现项建立字段来源矩阵：
 
-```text
-python <skill-root>/scripts/scan_site_impact.py \
-  --root <workspace> \
-  --reference <primary-reference> \
-  --output <temporary-json>
-```
+| 来源类型 | 示例 | 可进入本地回填块 |
+| --- | --- | --- |
+| `local-static` | bootstrap/application/config 文件中的地址、profile、端口 | 可以 |
+| `local-code` | Java Feign URL、enum 路由、Rust client/enum | 可以 |
+| `user-confirmed` | 用户给出的真实端点或实际身份值 | 可以 |
+| `external-config` | Nacos Data ID、Vault、CI/CD、站点注册 | 不可以；只进外部待办 |
+| `unknown` | 未在证据中出现的业务概念 | 不生成字段 |
 
-指定范围时追加 `--scope`；自定义 Cargo `target-dir` 追加 `--exclude-dir`。扫描报告不是完整影响面，不能替代 manifest/config/migration inventory。
+同时判定目标站点状态、参考项可用性和异常分支。参考 profile 的异常或不可达分支必须标记为“不可参考”，不能复制到新站。
 
-输出影响矩阵：能力、参考文件或外部配置、目标动作、所有权、范围内外、输入状态、验证方式和风险。
+### 4. 生成模板
 
-### 4. 始终生成模板
+读取 `assets/site-expansion-intake-template.md`，按字段来源矩阵生成，不照抄通用字段。
 
-读取 `assets/site-expansion-intake-template.md`，填入已知信息和扫描结果；未知值保留 `[待填写]`，不适用的条件字段写 `not-used`。
+模板必须包含并清晰分隔：
 
-若用户要求本轮只输出或禁止修改文件，则在响应中呈现完整可回填模板或明确的模板内容，不落盘；不得因此跳过模板。获得写文件授权后再按默认路径创建或更新文件。
+1. **本地 profile 回填块**：只包含 `local-static`、`local-code` 或 `user-confirmed` 字段；用于仓库内 profile、常量或客户端变更。
+2. **参考 profile 对照块**：与目标回填块的键、层级和顺序完全一致。参考值仅在用户要求或确有助于回填时展示；不适用或外部不可见值写 `null` 并说明原因。
+3. **外部配置待办**：列 Nacos/Vault/CI/DBA 等工件、namespace/group/Data ID、责任方、动作和发布前置条件；不要求用户把内容填回本地回传块。
+
+回传块必须是合法、可编辑的数据：未知标量用 `null`、未知数组用 `[]`。`[待填写]` 仅可用于正文表格提示，不能出现在可复制 YAML/JSON 块；不要生成 `true | false` 之类无效值。
 
 默认路径：优先 `docs/site-expansion/<site>-site-input.md`；仅有 `doc/` 时使用 `doc/site-expansion/<site>-site-input.md`。
 
-地址不完整且未授权占位时，到此停止；提示用户填写精简回传块后再次显式调用本 Skill。
+地址不完整且未授权占位时，到此停止；提示用户补齐本地回填块中的 `null`，并由外部配置责任方完成待办。
 
 ### 5. 建模连接拓扑
 
-读取 `references/topology-model.md`。按 cluster、instance、node、logical database 和 `reuseGroup` 建模，保持仓库原生数组、map、URI 或外部配置形态。
+读取 `references/topology-model.md`。仅为已发现或用户确认的 Kafka cluster、Redis instance、JDBC alias、HTTP/RPC endpoint 等建模；未知的外部 Nacos 内容只能列待办，不能虚构 cluster、broker、alias 或节点。
 
-多个 JDBC 数据源必须按现有 alias 逐项映射；alias 集合、数量和代码绑定保持不变，默认只替换对应地址。
+按 cluster、instance、node、logical database 和 `reuseGroup` 建模，保持仓库原生数组、map、URI 或外部配置形态。多个 JDBC 数据源按现有 alias 逐项映射；Redis logical database 不生成主机占位。
 
-只有用户明确授权时生成 `.invalid`。每个可独立寻址节点分别记录；Redis logical database 不生成主机占位。所有 parent/ref、节点数量和复用关系必须可验证。
+安全占位必须使用独立 `.invalid`，并区分已有占位与本次新增占位。只有用户确认的同一 `reuseGroup` 才能复用占位地址。
 
 ### 6. 计划与实施
 
-编辑前向用户汇报：
+编辑前汇报：语言与构建、允许/排除范围、目标状态、候选文件、字段来源、拓扑、外部待办、占位、迁移框架与发布顺序，以及不可复制的参考异常。
 
-- 语言、构建系统、允许/排除范围
-- 候选文件与外部配置
-- 站点选择器和条件身份字段
-- 拓扑、占位、迁移框架与发布顺序
-- 不复制的参考站点异常
+按影响矩阵实施最小对称改动：
 
-若没有阻塞项，按影响矩阵和仓库既有模式实施最小对称改动：
-
-- Java：检查适用的 Maven/Gradle module、应用配置、客户端、DTO/序列化、Mapper/ORM 和资源打包。
-- Rust：检查适用的 Cargo workspace/package、应用配置、enum/match/serde、trait/client、feature/cfg、`build.rs` 和资源加载；不得把 Cargo build profile 当应用站点。
-- 外部配置只列清单，不伪造本地文件。
+- Java：检查适用的 Maven/Gradle module、应用配置、客户端、DTO/序列化、Mapper/ORM 和资源打包；
+- Rust：检查 Cargo workspace/package、应用配置、enum/match/serde、trait/client、feature/cfg、`build.rs` 和资源加载；不得把 Cargo build profile 当应用站点；
+- 外部配置仅列清单，不伪造本地 Nacos 文件；
 - 迁移只创建和校验，不执行。
 
 ### 7. 验证与交付
 
-读取 `references/validation-checklist.md`，执行适用于当前技术栈的范围、ECO、身份、拓扑、代码契约、构建、迁移和 Git 检查。
+读取 `references/validation-checklist.md`。验证范围、ECO、字段来源、回传块同构、拓扑、代码契约、构建、迁移、Git 和新建文档。
 
-优先使用仓库 CI、wrapper、Makefile/justfile 的命令。无明确命令时：
-
-- Java：对目标 module 运行 Maven/Gradle 的 compile/test 等价检查。
-- Rust：先用 `cargo metadata --no-deps --format-version 1` 校验 workspace，再针对受影响 package 运行 `cargo check` 和必要 `cargo test`；不无依据使用全 workspace、`--all-features` 或 `--all-targets`。
-
-失败时修复本次问题并重跑；环境或上游失败必须与本次错误分开说明。
+优先使用仓库 CI、wrapper、Makefile/justfile。Java 先验证受影响目标 module；只有确有必要再使用 `-am` 验证反应堆依赖。若上游模块、JDK 或插件失败，区分于目标模块结果，不修改无关代码来绕过环境问题。
 
 ## 统一停止条件
 
-出现以下任一情况就停止，不猜测、不扩大范围：
+出现以下任一情况时停止，不猜测、不扩大范围：
 
-- 未确认全仓或允许范围
-- 新站点标识或实际采用的身份字段冲突
-- 主参考别名无法解析
-- 用户要求任何 ECO 改动
-- 地址不完整且未授权安全占位
-- parent/ref、节点角色、数量或 `reuseGroup` 不完整
-- 需要修改排除范围、未授权 module/crate 或用户已有改动
-- Rust Cargo workspace、应用站点选择器或迁移所有权不明确
+- 未确认允许范围；
+- 新站点标识或实际采用的身份字段冲突；
+- 主参考别名无法解析；
+- 用户要求任何 ECO 改动；
+- 地址不完整且未授权安全占位；
+- 已确认拓扑的 parent/ref、节点角色、数量或 `reuseGroup` 不完整；
+- 需要修改排除范围、未授权 module/crate 或用户已有改动；
+- Rust Cargo workspace、应用站点选择器或迁移所有权不明确。
+
+未知外部 Nacos 内容本身不是本地 profile 实施的阻塞项；应转为外部待办，除非其缺失会使用户要求的本地改动无法确定。
 
 ## 最终回复
 
 ```text
-已完成：站点身份、语言/构建、范围、代码/配置、外部工件
+已完成：站点状态、身份、语言/构建、范围、本地代码/配置、外部工件
 验证：命令、结果、覆盖计数、未验证项
-待补：模板路径、占位符、外部配置、迁移责任方与顺序
+待补：本地回填块的 null、已有/新增占位、外部配置责任方与发布顺序
 Git：是否暂存/提交/推送（默认全部否）
 ```
 
@@ -161,7 +157,7 @@ Git：是否暂存/提交/推送（默认全部否）
 
 - 仓库发现与 Java/Rust 入口：`references/repository-discovery.md`
 - Kafka/Redis/复用/占位模型：`references/topology-model.md`
-- 输出模板：`assets/site-expansion-intake-template.md`
+- 证据驱动模板：`assets/site-expansion-intake-template.md`
 - 最终验证：`references/validation-checklist.md`
 
 ## 调用示例
@@ -175,7 +171,7 @@ Git：是否暂存/提交/推送（默认全部否）
 ```
 
 ```text
-继续使用 iot-backend-site-expansion，#File docs/site-expansion/mea-site-input.md；先校验，之后实施，不执行迁移，不提交 Git。
+继续使用 iot-backend-site-expansion，#File docs/site-expansion/mea-site-input.md；先校验字段来源、目标/参考回传块同构、外部待办和残留 null；无阻塞后实施。不执行迁移，不提交 Git。
 ```
 
-未明确点名本 Skill，或只是维护已有站点时，不触发。
+未明确点名本 Skill，或只是维护已上线站点时，不触发。

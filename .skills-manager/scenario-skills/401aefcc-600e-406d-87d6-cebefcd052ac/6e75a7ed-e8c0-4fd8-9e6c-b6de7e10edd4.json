@@ -8,6 +8,7 @@
     "codex": true,
     "github_copilot": true,
     "kiro": true,
+    "openclaw": true,
     "pi": true,
     "qoder": true
   }
